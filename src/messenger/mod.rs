@@ -185,6 +185,16 @@ pub trait MessengerBackend: Send + Sync {
     /// the backend is expected to broadcast internally so multiple
     /// subscribers can coexist without dropping events.
     async fn subscribe(&self) -> Result<mpsc::UnboundedReceiver<Event>>;
+
+    /// Identifier the backend is logged in as — Signal's E.164 number,
+    /// Telegram's user_id rendered as a string. Returns `None` when the
+    /// backend hasn't (yet) resolved its own identity (no account
+    /// configured + zero local accounts; Telegram pre-login). The UI
+    /// uses this to decide whether an incoming message's `sender`
+    /// belongs to the local user.
+    fn self_account(&self) -> Option<&str> {
+        None
+    }
 }
 
 #[cfg(test)]

@@ -90,6 +90,14 @@ impl MessengerHub {
     fn find(&self, kind: Backend) -> Option<&Arc<dyn MessengerBackend>> {
         self.backends.iter().find(|b| b.backend() == kind)
     }
+
+    /// Identifier the registered backend is signed in as. Returns `None`
+    /// when the backend isn't registered or it hasn't resolved its own
+    /// identity yet (Signal with no account, Telegram pre-login).
+    pub fn self_account_for(&self, backend: Backend) -> Option<String> {
+        self.find(backend)
+            .and_then(|b| b.self_account().map(String::from))
+    }
 }
 
 #[cfg(test)]
@@ -294,6 +302,23 @@ mod tests {
         let backends: Vec<_> = convos.iter().map(|c| c.id.backend).collect();
         assert!(backends.contains(&Backend::Signal));
         assert!(backends.contains(&Backend::Telegram));
+    }
+
+    #[tokio::test]
+    async fn self_account_for_returns_none_for_unregistered() {
+        // Empty hub: every backend lookup misses → None.
+        let hub = MessengerHub::new();
+        assert!(hub.self_account_for(Backend::Signal).is_none());
+        assert!(hub.self_account_for(Backend::Telegram).is_none());
+
+        // Hub with only Signal: querying Telegram is still None;
+        // Signal goes through the trait default impl on MockBackend
+        // (which returns None), so this also exercises the
+        // "registered-but-no-id-yet" path.
+        let mut hub = MessengerHub::new();
+        hub.add(MockBackend::new(Backend::Signal));
+        assert!(hub.self_account_for(Backend::Telegram).is_none());
+        assert_eq!(hub.self_account_for(Backend::Signal), None);
     }
 
     /// Concatenation order across backends matches `add()` order. The
