@@ -7,10 +7,12 @@
 //! - [`input`]       — gdk → [`crate::vim::Key`] translation.
 //! - [`dispatcher`]  — apply [`crate::vim::Action`]s to the widget tree.
 //! - [`settings`]    — `adw::PreferencesWindow` over `~/.config/kryptos/config.toml`.
+//! - [`onboarding`]  — first-run device-link flow (QR + signal-cli polling).
 
 mod composer;
 mod dispatcher;
 mod input;
+pub mod onboarding;
 pub mod settings;
 mod statusline;
 mod window;
