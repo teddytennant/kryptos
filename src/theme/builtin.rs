@@ -15,6 +15,9 @@ pub const EVERFOREST_DARK: &str = include_str!("css/everforest-dark.css");
 pub const EVERFOREST_DARK_SOFT: &str = include_str!("css/everforest-dark-soft.css");
 pub const EVERFOREST_LIGHT: &str = include_str!("css/everforest-light.css");
 pub const EVERFOREST_LIGHT_SOFT: &str = include_str!("css/everforest-light-soft.css");
+pub const ROSE_PINE: &str = include_str!("css/rose-pine.css");
+pub const ROSE_PINE_MOON: &str = include_str!("css/rose-pine-moon.css");
+pub const ROSE_PINE_DAWN: &str = include_str!("css/rose-pine-dawn.css");
 
 /// Resolved built-in theme: which CSS blob, and which adw color scheme to
 /// nudge libadwaita-aware widgets toward.
@@ -86,6 +89,21 @@ pub const ALL: &[Builtin] = &[
     Builtin {
         canonical_name: "everforest-light-soft",
         css: EVERFOREST_LIGHT_SOFT,
+        color_scheme: ColorScheme::ForceLight,
+    },
+    Builtin {
+        canonical_name: "rose-pine",
+        css: ROSE_PINE,
+        color_scheme: ColorScheme::ForceDark,
+    },
+    Builtin {
+        canonical_name: "rose-pine-moon",
+        css: ROSE_PINE_MOON,
+        color_scheme: ColorScheme::ForceDark,
+    },
+    Builtin {
+        canonical_name: "rose-pine-dawn",
+        css: ROSE_PINE_DAWN,
         color_scheme: ColorScheme::ForceLight,
     },
 ];
