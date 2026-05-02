@@ -141,7 +141,10 @@ fn maybe_open_first_run_linker(window: &adw::ApplicationWindow) {
                     .map(|rt| {
                         rt.block_on(async {
                             match SignalClient::connect().await {
-                                Ok(c) => onboarding::first_run_check_async(&c).await,
+                                Ok(c) => {
+                                    let _ = crate::dbus::ensure_running(c.connection()).await;
+                                    onboarding::first_run_check_async(&c).await
+                                }
                                 Err(_) => false,
                             }
                         })

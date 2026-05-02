@@ -12,7 +12,9 @@
 //! See <https://github.com/AsamK/signal-cli/blob/master/man/signal-cli-dbus.5.adoc>.
 
 pub mod client;
+pub mod daemon;
 pub mod proxy;
 pub mod stream;
 
 pub use client::SignalClient;
+pub use daemon::ensure_running;

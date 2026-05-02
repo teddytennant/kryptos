@@ -490,6 +490,11 @@ fn run_link_flow(device_name: &str, tx: &mpsc::Sender<LinkEvent>) {
             }
         };
 
+        if let Err(e) = crate::dbus::ensure_running(client.connection()).await {
+            let _ = tx.send(LinkEvent::Error(format!("{e}")));
+            return;
+        }
+
         let before: std::collections::HashSet<String> = match client.list_accounts().await {
             Ok(list) => list.into_iter().collect(),
             Err(e) => {
