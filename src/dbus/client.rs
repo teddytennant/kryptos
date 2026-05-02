@@ -266,4 +266,42 @@ mod tests {
         assert!(validate_device_name("   ").is_err());
         assert!(validate_device_name(&"x".repeat(51)).is_err());
     }
+
+    #[test]
+    fn recipient_accepts_e164() {
+        assert!(validate_recipient("+14155552671").is_ok());
+        assert!(validate_recipient("  +14155552671  ").is_ok(), "leading/trailing ws");
+    }
+
+    #[test]
+    fn recipient_accepts_uuid() {
+        // Canonical dashed UUID.
+        assert!(validate_recipient("550e8400-e29b-41d4-a716-446655440000").is_ok());
+        // Bare 32 hex chars.
+        assert!(validate_recipient("550e8400e29b41d4a716446655440000").is_ok());
+        // Mixed case hex.
+        assert!(validate_recipient("550E8400-E29B-41D4-A716-446655440000").is_ok());
+    }
+
+    #[test]
+    fn recipient_rejects_garbage() {
+        assert!(validate_recipient("").is_err(), "empty");
+        assert!(validate_recipient("not-a-recipient").is_err(), "non-hex");
+        assert!(validate_recipient("14155552671").is_err(), "phone without +");
+        assert!(
+            validate_recipient("550e8400-e29b-41d4-a716-44665544000").is_err(),
+            "uuid one digit short"
+        );
+        assert!(
+            validate_recipient("550e8400-e29b-41d4-a716-4466554400gz").is_err(),
+            "uuid non-hex"
+        );
+    }
+
+    #[test]
+    fn group_id_rejects_empty() {
+        assert!(validate_group_id(&[]).is_err());
+        assert!(validate_group_id(&[0u8]).is_ok());
+        assert!(validate_group_id(&[1u8, 2, 3, 4]).is_ok());
+    }
 }
