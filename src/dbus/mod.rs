@@ -13,5 +13,6 @@
 
 pub mod client;
 pub mod proxy;
+pub mod stream;
 
 pub use client::SignalClient;
