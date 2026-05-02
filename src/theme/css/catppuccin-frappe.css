@@ -33,10 +33,13 @@ box.sidebar {
   border-right: 1px solid @kryptos_surface;
 }
 
-listview row {
+listview row,
+.kryptos-chat-row,
+listbox.navigation-sidebar > row {
   background-color: transparent;
   color: @kryptos_fg;
-  padding: 6px 10px;
+  padding: 10px 14px;
+  margin: 0;
 }
 
 listview row:hover {
@@ -167,4 +170,40 @@ entry.command-bar-entry,
   color: @kryptos_red;
   padding: 0;
   font-weight: 700;
+}
+
+/* ----- Rhythm + spacing (8px base unit) ----------------------------------- */
+
+.bubble {
+  padding: 10px 14px;
+  border-radius: 10px;
+}
+
+.kryptos-composer,
+.composer-frame {
+  padding: 12px;
+  margin: 0;
+  border-radius: 0;
+  border: none;
+  border-top: 1px solid @kryptos_overlay;
+  background-color: @kryptos_bg;
+}
+
+textview.composer,
+.composer textview,
+.composer-frame textview {
+  background-color: transparent;
+}
+
+.kryptos-modeline,
+.mode-line-row {
+  padding: 4px 14px;
+  background-color: @kryptos_bg;
+  border-top: 1px solid @kryptos_overlay;
+}
+
+.command-bar {
+  padding: 6px 14px;
+  background-color: @kryptos_bg;
+  border-top: 1px solid @kryptos_overlay;
 }
