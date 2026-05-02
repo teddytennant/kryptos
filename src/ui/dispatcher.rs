@@ -7,14 +7,15 @@ use tracing::{debug, info};
 
 use crate::vim::{Action, Mode};
 
+use super::composer::{Composer, ComposerMode};
 use super::statusline::CommandBar;
-use super::window::{drain_composer, move_sidebar_selection, WindowParts};
+use super::window::{move_sidebar_selection, WindowParts};
 
 #[derive(Clone)]
 pub struct Dispatcher {
     pub window: adw::ApplicationWindow,
     pub sidebar_list: gtk::ListBox,
-    pub composer: gtk::TextView,
+    pub composer: Composer,
     pub command_bar: CommandBar,
     pub content_title: adw::WindowTitle,
 }
@@ -52,20 +53,23 @@ impl Dispatcher {
                 Some(Mode::Search)
             }
             Action::ComposeNew | Action::Reply => {
-                self.composer.grab_focus();
+                self.composer.focus();
+                self.composer.set_mode(ComposerMode::Insert);
                 Some(Mode::Insert)
             }
             Action::LeaveInsert => {
+                self.composer.set_mode(ComposerMode::Normal);
                 gtk::prelude::GtkWindowExt::set_focus(&self.window, gtk::Widget::NONE);
                 Some(Mode::Normal)
             }
             Action::SendMessage => {
-                let text = drain_composer(&self.composer);
+                let text = self.composer.drain();
                 if text.trim().is_empty() {
                     debug!("SendMessage with empty composer; ignored");
                 } else {
                     info!(message = %text, "send message (placeholder)");
                 }
+                self.composer.set_mode(ComposerMode::Normal);
                 Some(Mode::Normal)
             }
             Action::Quit => {
