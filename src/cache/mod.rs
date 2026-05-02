@@ -16,6 +16,9 @@ use crate::core::{Error, Result};
 pub mod models;
 pub mod repo;
 
+#[cfg(test)]
+mod tests;
+
 /// Embedded migrations from `<crate>/migrations`.
 static MIGRATOR: sqlx::migrate::Migrator = sqlx::migrate!("./migrations");
 
