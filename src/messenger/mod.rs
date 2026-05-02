@@ -13,6 +13,7 @@
 //! All chat IDs travel as [`ChatId`] (`backend + native id`) so the UI can
 //! mix backends without losing track of where a conversation came from.
 
+pub mod hub;
 pub mod signal;
 pub mod telegram;
 
@@ -23,6 +24,8 @@ use async_trait::async_trait;
 use tokio::sync::mpsc;
 
 use crate::core::Result;
+
+pub use hub::MessengerHub;
 
 /// Which protocol a chat / message belongs to.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
