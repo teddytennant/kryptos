@@ -29,13 +29,16 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use grammers_client::session::{PackedChat, Session};
 use grammers_client::{
-    types::LoginToken, Client, Config as GClientConfig, InitParams, SignInError,
+    types::{InputMessage, LoginToken},
+    Client, Config as GClientConfig, InitParams, SignInError,
 };
+use grammers_tl_types as tl;
 use tokio::sync::{broadcast, mpsc, Mutex};
 
 use crate::core::{Error, Result};
 use crate::messenger::{
-    Backend, ChatId, ConversationSummary, Event, MessengerBackend, NormalizedMessage,
+    Backend, BackendExtras, ChatId, ConversationSummary, Event, MessengerBackend,
+    NormalizedAttachment, NormalizedMessage,
 };
 
 const BROADCAST_CAPACITY: usize = 256;
@@ -195,6 +198,11 @@ impl TelegramBackend {
     }
 }
 
+/// Cap on `list_conversations`. Telegram users routinely have
+/// hundreds of dialogs; pulling 200 is enough to fill any sidebar
+/// without paying for a full traversal on every refresh.
+const DIALOG_LIMIT: usize = 200;
+
 #[async_trait]
 impl MessengerBackend for TelegramBackend {
     fn backend(&self) -> Backend {
@@ -202,33 +210,141 @@ impl MessengerBackend for TelegramBackend {
     }
 
     async fn list_conversations(&self) -> Result<Vec<ConversationSummary>> {
-        Err(Error::Telegram("list_conversations: not yet implemented".into()))
+        let mut iter = self.client.iter_dialogs().limit(DIALOG_LIMIT);
+        let mut out = Vec::new();
+        while let Some(dialog) = iter
+            .next()
+            .await
+            .map_err(|e| Error::Telegram(format!("iter_dialogs: {e}")))?
+        {
+            let chat = dialog.chat();
+            let last_message_ts = dialog
+                .last_message
+                .as_ref()
+                .map(|m| conv::datetime_to_ms(m.date()));
+            let unread = match &dialog.raw {
+                tl::enums::Dialog::Dialog(d) => d.unread_count.max(0) as u32,
+                tl::enums::Dialog::Folder(_) => 0,
+            };
+            out.push(ConversationSummary {
+                id: ChatId::new(Backend::Telegram, conv::packed_to_native(chat.pack())),
+                title: chat.name().to_string(),
+                last_message_ts,
+                unread,
+            });
+        }
+        Ok(out)
     }
 
     async fn fetch_history(
         &self,
-        _id: &ChatId,
-        _limit: u32,
-        _before_ts: Option<i64>,
+        id: &ChatId,
+        limit: u32,
+        before_ts: Option<i64>,
     ) -> Result<Vec<NormalizedMessage>> {
-        Err(Error::Telegram("fetch_history: not yet implemented".into()))
+        if id.backend != Backend::Telegram {
+            return Err(Error::Telegram(format!(
+                "TelegramBackend cannot fetch from {} chat",
+                id.backend
+            )));
+        }
+        let packed = conv::native_to_packed(&id.native)?;
+        let mut iter = self.client.iter_messages(packed).limit(limit as usize);
+        let mut out = Vec::new();
+        while let Some(msg) = iter
+            .next()
+            .await
+            .map_err(|e| Error::Telegram(format!("iter_messages: {e}")))?
+        {
+            let ts_ms = conv::datetime_to_ms(msg.date());
+            // `before_ts` walks backwards in time: skip anything newer
+            // than the cursor. grammers' iterator already returns
+            // newest-first, so we just filter as we go.
+            if let Some(cutoff) = before_ts {
+                if ts_ms >= cutoff {
+                    continue;
+                }
+            }
+            out.push(message_to_normalized(&msg, id));
+        }
+        Ok(out)
     }
 
     async fn send_message(
         &self,
-        _id: &ChatId,
-        _body: &str,
-        _attachments: &[PathBuf],
+        id: &ChatId,
+        body: &str,
+        attachments: &[PathBuf],
     ) -> Result<i64> {
-        Err(Error::Telegram("send_message: not yet implemented".into()))
+        if id.backend != Backend::Telegram {
+            return Err(Error::Telegram(format!(
+                "TelegramBackend cannot send to {} chat",
+                id.backend
+            )));
+        }
+        let packed = conv::native_to_packed(&id.native)?;
+
+        // Build the InputMessage. v1: when there are attachments we
+        // upload the first one and ship it with `body` as the
+        // caption. Multi-attachment albums need `send_album` and a
+        // separate code path that's deferred until the UI grows
+        // album-style composing.
+        let input = if let Some(path) = attachments.first() {
+            let uploaded = self
+                .client
+                .upload_file(path)
+                .await
+                .map_err(|e| Error::Telegram(format!("upload_file: {e}")))?;
+            InputMessage::text(body).file(uploaded)
+        } else {
+            InputMessage::text(body)
+        };
+
+        let sent = self
+            .client
+            .send_message(packed, input)
+            .await
+            .map_err(|e| Error::Telegram(format!("send_message: {e}")))?;
+        Ok(conv::datetime_to_ms(sent.date()))
     }
 
-    async fn mark_read(&self, _id: &ChatId) -> Result<()> {
-        Err(Error::Telegram("mark_read: not yet implemented".into()))
+    async fn mark_read(&self, id: &ChatId) -> Result<()> {
+        if id.backend != Backend::Telegram {
+            return Err(Error::Telegram(format!(
+                "TelegramBackend cannot mark_read on {} chat",
+                id.backend
+            )));
+        }
+        let packed = conv::native_to_packed(&id.native)?;
+        self.client
+            .mark_as_read(packed)
+            .await
+            .map_err(|e| Error::Telegram(format!("mark_as_read: {e}")))?;
+        Ok(())
     }
 
-    async fn typing(&self, _id: &ChatId, _on: bool) -> Result<()> {
-        Err(Error::Telegram("typing: not yet implemented".into()))
+    async fn typing(&self, id: &ChatId, on: bool) -> Result<()> {
+        if id.backend != Backend::Telegram {
+            return Err(Error::Telegram(format!(
+                "TelegramBackend cannot typing on {} chat",
+                id.backend
+            )));
+        }
+        let packed = conv::native_to_packed(&id.native)?;
+        let action = self.client.action(packed);
+        let result = if on {
+            // One-shot typing notification. Telegram auto-expires it
+            // after ~6s server-side, so for sustained typing the UI
+            // would need to call us again — which is fine, vim users
+            // are bursty.
+            action
+                .oneshot(tl::enums::SendMessageAction::SendMessageTypingAction)
+                .await
+        } else {
+            action.cancel().await
+        };
+        result.map_err(|e| Error::Telegram(format!("set typing: {e}")))?;
+        Ok(())
     }
 
     async fn subscribe(&self) -> Result<mpsc::UnboundedReceiver<Event>> {
@@ -251,6 +367,39 @@ impl MessengerBackend for TelegramBackend {
             }
         });
         Ok(rx)
+    }
+}
+
+/// Convert a grammers [`Message`](grammers_client::types::Message)
+/// into the protocol-neutral [`NormalizedMessage`]. The `id` is the
+/// `ChatId` of the conversation we fetched from; we copy it instead
+/// of recomputing the chat hex per message because `iter_messages`
+/// already addresses one chat at a time.
+fn message_to_normalized(
+    msg: &grammers_client::types::Message,
+    id: &ChatId,
+) -> NormalizedMessage {
+    let sender = msg
+        .sender()
+        .map(|c| c.name().to_string())
+        .filter(|s| !s.is_empty())
+        .unwrap_or_default();
+
+    let reply_to_msg_id = match msg.reply_header() {
+        Some(tl::enums::MessageReplyHeader::Header(h)) => h.reply_to_msg_id.map(i64::from),
+        _ => None,
+    };
+
+    NormalizedMessage {
+        id: id.clone(),
+        ts_ms: conv::datetime_to_ms(msg.date()),
+        sender,
+        body: conv::text_to_body(msg.text()),
+        // Attachments aren't decoded into local files for history
+        // backfill — the message's media reference would still need
+        // a download pass. Keep the slot honest by leaving it empty.
+        attachments: Vec::<NormalizedAttachment>::new(),
+        backend_extras: BackendExtras::Telegram { reply_to_msg_id },
     }
 }
 
