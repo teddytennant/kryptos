@@ -1,3 +1,7 @@
+use std::process;
+
 fn main() {
-    println!("Hello, world!");
+    sigvim::core::logging::init();
+    let exit = sigvim::ui::run();
+    process::exit(exit.value());
 }
