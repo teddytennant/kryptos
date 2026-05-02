@@ -16,6 +16,12 @@ pub enum Error {
 
     #[error("toml serialize: {0}")]
     TomlSerialize(#[from] toml::ser::Error),
+
+    #[error("sqlx: {0}")]
+    Sqlx(#[from] sqlx::Error),
+
+    #[error("migrate: {0}")]
+    Migrate(#[from] sqlx::migrate::MigrateError),
 }
 
 pub type Result<T> = std::result::Result<T, Error>;
