@@ -20,6 +20,7 @@ use adw::prelude::*;
 use crate::config::Config;
 
 use super::composer::Composer;
+use super::onboarding;
 use super::settings::Settings;
 use super::statusline::{CommandBar, ModeLine};
 
@@ -45,7 +46,7 @@ const PLACEHOLDER_MESSAGES: &[(bool, &str)] = &[
 pub fn build(app: &adw::Application, cfg: &Config) -> WindowParts {
     let sidebar_list = build_sidebar_list();
     let sidebar = build_sidebar(&sidebar_list);
-    let (content, content_title, composer, prefs_button) = build_content();
+    let (content, content_title, composer, prefs_button, link_button) = build_content();
 
     let split = adw::OverlaySplitView::builder()
         .sidebar(&sidebar)
@@ -81,6 +82,9 @@ pub fn build(app: &adw::Application, cfg: &Config) -> WindowParts {
 
     let win_for_prefs = window.clone();
     prefs_button.connect_clicked(move |_| Settings::open(&win_for_prefs));
+
+    let win_for_link = window.clone();
+    link_button.connect_clicked(move |_| onboarding::open_linker(&win_for_link));
 
     install_styles();
 
@@ -164,7 +168,7 @@ fn build_sidebar(list: &gtk::ListBox) -> gtk::Widget {
     toolbar.upcast::<gtk::Widget>()
 }
 
-fn build_content() -> (gtk::Widget, adw::WindowTitle, Composer, gtk::Button) {
+fn build_content() -> (gtk::Widget, adw::WindowTitle, Composer, gtk::Button, gtk::Button) {
     let title = adw::WindowTitle::new(PLACEHOLDER_CHATS[0], "");
     let header = adw::HeaderBar::builder().title_widget(&title).build();
 
@@ -172,6 +176,14 @@ fn build_content() -> (gtk::Widget, adw::WindowTitle, Composer, gtk::Button) {
     prefs_button.set_tooltip_text(Some("Preferences"));
     prefs_button.add_css_class("flat");
     header.pack_end(&prefs_button);
+
+    // "Link new device" lives in the header so users can re-enter the
+    // onboarding flow at any time (e.g. after wiping the signal-cli
+    // state, or from a fresh install).
+    let link_button = gtk::Button::from_icon_name("phone-symbolic");
+    link_button.set_tooltip_text(Some("Link new device"));
+    link_button.add_css_class("flat");
+    header.pack_end(&link_button);
 
     let messages_box = gtk::Box::builder()
         .orientation(gtk::Orientation::Vertical)
@@ -210,7 +222,7 @@ fn build_content() -> (gtk::Widget, adw::WindowTitle, Composer, gtk::Button) {
     let toolbar = adw::ToolbarView::new();
     toolbar.add_top_bar(&header);
     toolbar.set_content(Some(&body));
-    (toolbar.upcast::<gtk::Widget>(), title, composer, prefs_button)
+    (toolbar.upcast::<gtk::Widget>(), title, composer, prefs_button, link_button)
 }
 
 fn message_bubble(mine: bool, body: &str) -> gtk::Widget {

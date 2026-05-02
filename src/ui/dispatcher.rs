@@ -8,6 +8,7 @@ use tracing::{debug, info};
 use crate::vim::{Action, Mode};
 
 use super::composer::{Composer, ComposerMode};
+use super::onboarding;
 use super::statusline::CommandBar;
 use super::window::{move_sidebar_selection, WindowParts};
 
@@ -112,6 +113,7 @@ impl Dispatcher {
                 }
             }
             "reload" => info!("reload — TODO"),
+            "link" => onboarding::open_linker(&self.window),
             other => info!(cmd = %other, "unknown command"),
         }
     }
