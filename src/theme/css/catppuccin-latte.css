@@ -1,0 +1,77 @@
+/* Catppuccin Latte — https://catppuccin.com */
+
+@define-color kryptos_bg       #eff1f5;
+@define-color kryptos_mantle   #e6e9ef;
+@define-color kryptos_surface  #ccd0da;
+@define-color kryptos_surface2 #bcc0cc;
+@define-color kryptos_overlay  #9ca0b0;
+@define-color kryptos_fg       #4c4f69;
+@define-color kryptos_subtle   #6c6f85;
+@define-color kryptos_accent   #8839ef;
+@define-color kryptos_blue     #1e66f5;
+@define-color kryptos_green    #40a02b;
+@define-color kryptos_yellow   #df8e1d;
+@define-color kryptos_red      #d20f39;
+@define-color kryptos_lavender #7287fd;
+
+window {
+  background-color: @kryptos_bg;
+  color: @kryptos_fg;
+}
+
+headerbar {
+  background-color: @kryptos_mantle;
+  color: @kryptos_fg;
+  border-bottom: 1px solid @kryptos_surface;
+  box-shadow: none;
+}
+
+box.sidebar {
+  background-color: @kryptos_mantle;
+  border-right: 1px solid @kryptos_surface;
+}
+
+listview row {
+  background-color: transparent;
+  color: @kryptos_fg;
+  padding: 6px 10px;
+}
+
+listview row:hover {
+  background-color: alpha(@kryptos_surface, 0.6);
+}
+
+listview row:selected {
+  background-color: @kryptos_surface;
+  color: @kryptos_fg;
+}
+
+textview, textview text {
+  background-color: @kryptos_bg;
+  color: @kryptos_fg;
+  caret-color: @kryptos_lavender;
+}
+
+textview text selection {
+  background-color: alpha(@kryptos_lavender, 0.35);
+  color: @kryptos_fg;
+}
+
+entry {
+  background-color: @kryptos_mantle;
+  color: @kryptos_fg;
+  border: 1px solid @kryptos_surface;
+  border-radius: 4px;
+  padding: 4px 8px;
+  caret-color: @kryptos_lavender;
+}
+
+entry:focus {
+  border-color: @kryptos_accent;
+  outline: none;
+}
+
+.modeline.normal   { background-color: @kryptos_green;    color: @kryptos_bg; padding: 2px 8px; font-weight: bold; }
+.modeline.insert   { background-color: @kryptos_blue;     color: @kryptos_bg; padding: 2px 8px; font-weight: bold; }
+.modeline.command  { background-color: @kryptos_lavender; color: @kryptos_bg; padding: 2px 8px; font-weight: bold; }
+.modeline.search   { background-color: @kryptos_yellow;   color: @kryptos_bg; padding: 2px 8px; font-weight: bold; }

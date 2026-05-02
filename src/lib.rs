@@ -6,6 +6,7 @@
 //! - [`config`] — parse and watch `~/.config/kryptos/config.toml`.
 //! - [`core`]   — shared error type, logging.
 //! - [`dbus`]   — type-safe zbus proxy for signal-cli.
+//! - [`theme`]  — built-in palettes + drop-in custom CSS, hot-reloaded.
 //! - [`ui`]     — gtk4 + libadwaita view layer.
 //! - [`vim`]    — modal state machine and keymap evaluator.
 
@@ -13,5 +14,6 @@ pub mod cache;
 pub mod config;
 pub mod core;
 pub mod dbus;
+pub mod theme;
 pub mod ui;
 pub mod vim;
