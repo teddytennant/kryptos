@@ -5,6 +5,8 @@
 //! proxy. Input is validated at the boundary so D-Bus calls never see
 //! malformed phone numbers / verification codes / device names.
 
+use std::path::{Path, PathBuf};
+
 use tracing::{debug, info};
 use zbus::Connection;
 
@@ -78,6 +80,59 @@ impl SignalClient {
             .await?;
         Ok(proxy)
     }
+
+    /// Send a plain-text message to a single recipient (E.164 or UUID).
+    /// Returns the timestamp signal-cli assigned to the message.
+    pub async fn send_text(
+        &self,
+        account: &str,
+        recipient: &str,
+        message: &str,
+    ) -> Result<i64> {
+        validate_recipient(recipient)?;
+        let proxy = self.account(account).await?;
+        debug!(%account, %recipient, len = message.len(), "send_text");
+        Ok(proxy.send_message(message, &[], recipient).await?)
+    }
+
+    /// Send a message with attachments. Each path must exist and be readable.
+    pub async fn send_with_attachments(
+        &self,
+        account: &str,
+        recipient: &str,
+        message: &str,
+        paths: &[PathBuf],
+    ) -> Result<i64> {
+        validate_recipient(recipient)?;
+        // Owned strings keep the &str slice alive for the D-Bus call.
+        let mut owned: Vec<String> = Vec::with_capacity(paths.len());
+        for p in paths {
+            validate_attachment_path(p)?;
+            owned.push(p.to_string_lossy().into_owned());
+        }
+        let borrowed: Vec<&str> = owned.iter().map(String::as_str).collect();
+        let proxy = self.account(account).await?;
+        debug!(
+            %account,
+            %recipient,
+            attachments = paths.len(),
+            "send_with_attachments"
+        );
+        Ok(proxy.send_message(message, &borrowed, recipient).await?)
+    }
+
+    /// Send a plain-text message to a group.
+    pub async fn send_group_text(
+        &self,
+        account: &str,
+        group_id: &[u8],
+        message: &str,
+    ) -> Result<i64> {
+        validate_group_id(group_id)?;
+        let proxy = self.account(account).await?;
+        debug!(%account, group_len = group_id.len(), "send_group_text");
+        Ok(proxy.send_group_message(message, &[], group_id).await?)
+    }
 }
 
 /// signal-cli encodes E.164 numbers in the object path by stripping
@@ -87,7 +142,7 @@ fn account_object_path(account: &str) -> String {
     format!("/org/asamk/Signal/_{digits}")
 }
 
-fn validate_phone_number(s: &str) -> Result<()> {
+pub(crate) fn validate_phone_number(s: &str) -> Result<()> {
     let trimmed = s.trim();
     if !trimmed.starts_with('+') || trimmed.len() < 8 || trimmed.len() > 20 {
         return Err(Error::Config(format!(
@@ -115,6 +170,49 @@ fn validate_verify_code(s: &str) -> Result<()> {
             "invalid verification code {s:?}: only digits, spaces, and hyphens allowed"
         )));
     }
+    Ok(())
+}
+
+/// signal-cli accepts either an E.164 phone number or a Signal UUID
+/// (32 hex digits, with or without the canonical 8-4-4-4-12 dashes).
+pub(crate) fn validate_recipient(s: &str) -> Result<()> {
+    let trimmed = s.trim();
+    if trimmed.starts_with('+') {
+        return validate_phone_number(trimmed);
+    }
+    let hex: String = trimmed.chars().filter(|c| *c != '-').collect();
+    if hex.len() == 32 && hex.chars().all(|c| c.is_ascii_hexdigit()) {
+        return Ok(());
+    }
+    Err(Error::Config(format!(
+        "invalid recipient {trimmed:?}: expected E.164 (+14155552671) or UUID"
+    )))
+}
+
+pub(crate) fn validate_group_id(id: &[u8]) -> Result<()> {
+    if id.is_empty() {
+        return Err(Error::Config("group id cannot be empty".into()));
+    }
+    Ok(())
+}
+
+fn validate_attachment_path(p: &Path) -> Result<()> {
+    let meta = std::fs::metadata(p).map_err(|e| {
+        Error::Config(format!(
+            "attachment {}: {e}",
+            p.display()
+        ))
+    })?;
+    if !meta.is_file() {
+        return Err(Error::Config(format!(
+            "attachment {} is not a regular file",
+            p.display()
+        )));
+    }
+    // Probe readability — metadata alone doesn't guarantee read permission.
+    std::fs::File::open(p).map_err(|e| {
+        Error::Config(format!("attachment {} not readable: {e}", p.display()))
+    })?;
     Ok(())
 }
 
@@ -167,5 +265,43 @@ mod tests {
         assert!(validate_device_name("").is_err());
         assert!(validate_device_name("   ").is_err());
         assert!(validate_device_name(&"x".repeat(51)).is_err());
+    }
+
+    #[test]
+    fn recipient_accepts_e164() {
+        assert!(validate_recipient("+14155552671").is_ok());
+        assert!(validate_recipient("  +14155552671  ").is_ok(), "leading/trailing ws");
+    }
+
+    #[test]
+    fn recipient_accepts_uuid() {
+        // Canonical dashed UUID.
+        assert!(validate_recipient("550e8400-e29b-41d4-a716-446655440000").is_ok());
+        // Bare 32 hex chars.
+        assert!(validate_recipient("550e8400e29b41d4a716446655440000").is_ok());
+        // Mixed case hex.
+        assert!(validate_recipient("550E8400-E29B-41D4-A716-446655440000").is_ok());
+    }
+
+    #[test]
+    fn recipient_rejects_garbage() {
+        assert!(validate_recipient("").is_err(), "empty");
+        assert!(validate_recipient("not-a-recipient").is_err(), "non-hex");
+        assert!(validate_recipient("14155552671").is_err(), "phone without +");
+        assert!(
+            validate_recipient("550e8400-e29b-41d4-a716-44665544000").is_err(),
+            "uuid one digit short"
+        );
+        assert!(
+            validate_recipient("550e8400-e29b-41d4-a716-4466554400gz").is_err(),
+            "uuid non-hex"
+        );
+    }
+
+    #[test]
+    fn group_id_rejects_empty() {
+        assert!(validate_group_id(&[]).is_err());
+        assert!(validate_group_id(&[0u8]).is_ok());
+        assert!(validate_group_id(&[1u8, 2, 3, 4]).is_ok());
     }
 }
