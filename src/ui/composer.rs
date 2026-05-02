@@ -77,7 +77,9 @@ enum PendingOp {
 pub struct Composer {
     text_view: gtk::TextView,
     wrapper: gtk::Box,
-    mode_badge: gtk::Label,
+    /// Label inside the mode-badge pill; separated from the badge box so
+    /// the leading dot indicator can be styled independently.
+    mode_badge_text: gtk::Label,
     mode: Rc<RefCell<ComposerMode>>,
     on_send: Rc<RefCell<Option<SendCallback>>>,
     yank: Rc<RefCell<String>>,
@@ -96,19 +98,33 @@ impl Composer {
         text_view.add_css_class("kryptos-composer");
         text_view.buffer().set_enable_undo(true);
 
-        let mode_badge = gtk::Label::builder()
+        // Pill-shaped mode badge with a leading dot indicator. The dot
+        // is its own label so CSS can colour and animate it independently
+        // of the badge text.
+        let mode_dot = gtk::Label::builder().label("\u{2022}").build();
+        mode_dot.add_css_class("composer-mode-dot");
+
+        let mode_text = gtk::Label::builder()
             .label(ComposerMode::Normal.label())
             .xalign(0.0)
             .build();
+
+        let mode_badge = gtk::Box::builder()
+            .orientation(gtk::Orientation::Horizontal)
+            .spacing(0)
+            .build();
         mode_badge.add_css_class("composer-mode-badge");
+        mode_badge.append(&mode_dot);
+        mode_badge.append(&mode_text);
 
         let badge_row = gtk::Box::builder()
             .orientation(gtk::Orientation::Horizontal)
             .spacing(0)
             .build();
         badge_row.append(&mode_badge);
-        badge_row.set_margin_start(6);
-        badge_row.set_margin_top(2);
+        badge_row.set_margin_start(10);
+        badge_row.set_margin_top(6);
+        badge_row.set_margin_bottom(2);
 
         let wrapper = gtk::Box::builder()
             .orientation(gtk::Orientation::Vertical)
@@ -122,7 +138,7 @@ impl Composer {
         let composer = Self {
             text_view,
             wrapper,
-            mode_badge,
+            mode_badge_text: mode_text,
             mode: Rc::new(RefCell::new(ComposerMode::Normal)),
             on_send: Rc::new(RefCell::new(None)),
             yank: Rc::new(RefCell::new(String::new())),
@@ -153,7 +169,7 @@ impl Composer {
     pub fn set_mode(&self, m: ComposerMode) {
         *self.mode.borrow_mut() = m;
         *self.pending.borrow_mut() = PendingOp::None;
-        self.mode_badge.set_label(m.label());
+        self.mode_badge_text.set_label(m.label());
         for c in ALL_MODE_CLASSES {
             self.wrapper.remove_css_class(c);
             self.text_view.remove_css_class(c);
