@@ -25,6 +25,16 @@ pub enum Error {
 
     #[error("notify: {0}")]
     Notify(#[from] notify_rust::error::Error),
+
+    /// Telegram backend errors. `grammers` exposes several distinct
+    /// error types (`InvocationError`, `AuthorizationError`,
+    /// `SignInError`, plus plain `io::Error` for session i/o and a
+    /// parse error for `PackedChat` hex). They land here as a
+    /// flattened string so callers can pattern-match on
+    /// `Error::Telegram(_)` without dragging the grammers dependency
+    /// into the rest of the app.
+    #[error("telegram: {0}")]
+    Telegram(String),
 }
 
 pub type Result<T> = std::result::Result<T, Error>;

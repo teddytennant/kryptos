@@ -22,6 +22,10 @@ zbus = { version = "5", default-features = false, features = ["tokio"] }
 grammers-client = "0.7"
 grammers-session = "0.7"
 grammers-tl-types = "0.7"
+# `grammers` exposes message timestamps as `chrono::DateTime<Utc>`. We
+# already pull chrono in transitively, but list it directly so the
+# conversion module can name the type without `cfg(grammers)` games.
+chrono = { version = "0.4", default-features = false, features = ["std"] }
 
 # Async runtime
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "sync", "time", "fs", "process", "signal"] }
