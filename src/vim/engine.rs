@@ -311,6 +311,60 @@ mod tests {
         );
     }
 
+    /// Same prefix bound differently per mode: `dd` in Normal, `d` in
+    /// Insert. Both must dispatch only when the engine is in their
+    /// own mode — Normal must wait for the second `d`, Insert must
+    /// fire on the first. Locks the per-mode keymap isolation so a
+    /// future refactor that accidentally merges the maps would fail.
+    #[test]
+    fn same_key_resolves_per_mode_independently() {
+        let normal = map_with(&[("dd", Action::ArchiveChat)]);
+        let insert = map_with(&[("d", Action::LeaveInsert)]);
+        let mut e = Engine::new(KeymapSet {
+            normal,
+            insert,
+            ..Default::default()
+        });
+
+        // Normal mode: first `d` is pending (waiting for second), second `d`
+        // fires the Normal binding.
+        assert_eq!(e.feed(k('d')), Outcome::Pending);
+        assert_eq!(e.feed(k('d')), Outcome::Action(Action::ArchiveChat));
+
+        // Switch to Insert: same physical key resolves to the Insert
+        // binding immediately, no `Pending` intermediate.
+        e.set_mode(Mode::Insert);
+        assert_eq!(e.feed(k('d')), Outcome::Action(Action::LeaveInsert));
+
+        // Back to Normal: pending behaviour returns. (Mode change cleared
+        // pending, so this is the same as a cold start.)
+        e.set_mode(Mode::Normal);
+        assert_eq!(e.feed(k('d')), Outcome::Pending);
+    }
+
+    /// A key that doesn't continue any sequence after a partial match
+    /// in one mode must still work in another mode where it IS bound.
+    /// Regression guard: an earlier draft cached the lookup map per
+    /// engine instead of per call, so a mode flip mid-sequence would
+    /// produce stale `Lookup::None`.
+    #[test]
+    fn pending_then_mode_flip_re_resolves_against_new_map() {
+        let normal = map_with(&[("dd", Action::ArchiveChat)]);
+        let insert = map_with(&[("d", Action::LeaveInsert)]);
+        let mut e = Engine::new(KeymapSet {
+            normal,
+            insert,
+            ..Default::default()
+        });
+
+        assert_eq!(e.feed(k('d')), Outcome::Pending);
+        // Flip mode mid-sequence (`Esc` from a real UI). Pending clears.
+        e.set_mode(Mode::Insert);
+        // Now `d` should fire the Insert binding, not be cancelled or
+        // treated as the second char of `dd`.
+        assert_eq!(e.feed(k('d')), Outcome::Action(Action::LeaveInsert));
+    }
+
     #[test]
     fn leader_inside_sequence_also_expands() {
         // `g<leader>` — leader appears mid-sequence, not at the head.

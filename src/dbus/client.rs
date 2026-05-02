@@ -36,7 +36,9 @@ impl SignalClient {
     pub async fn link(&self, device_name: &str) -> Result<String> {
         validate_device_name(device_name)?;
         let proxy = SignalControlProxy::new(&self.conn).await?;
-        info!(%device_name, "requesting device link URI");
+        // PII: device_name is user-supplied; demote to debug.
+        info!(name_len = device_name.len(), "requesting device link URI");
+        debug!(%device_name, "link device_name");
         let uri = proxy.link(device_name).await?;
         debug!(%uri, "got link URI");
         Ok(uri)

@@ -92,7 +92,8 @@ impl Dispatcher {
                 if text.trim().is_empty() {
                     debug!("SendMessage with empty composer; ignored");
                 } else {
-                    info!(message = %text, "send message (placeholder)");
+                    // PII: never log message body. `len` is enough for tracing.
+                    info!(len = text.len(), "send message (placeholder)");
                 }
                 self.composer.set_mode(ComposerMode::Normal);
                 Some(Mode::Normal)
@@ -151,7 +152,8 @@ impl Dispatcher {
     /// Empty input clears the filter.
     pub fn run_search(&self, line: &str) {
         let q = line.trim().to_string();
-        info!(query = %q, "search");
+        // PII: search queries can contain names/numbers; only len at info.
+        info!(len = q.len(), "search");
         *self.search_filter.borrow_mut() = q;
         self.sidebar_list.invalidate_filter();
     }

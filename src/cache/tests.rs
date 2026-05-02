@@ -250,6 +250,54 @@ async fn bad_raw_query_returns_sqlx_error() {
     assert!(format!("{our_err}").starts_with("sqlx:"));
 }
 
+/// `mark_read` interleaved with `insert_message` must be atomic at the
+/// SQL level — the unread-count zero-out and the new-message bump
+/// can't see partial state from each other. We don't strictly order
+/// the two operations (the UI shouldn't either), but every `(insert,
+/// mark_read)` pair must end with `unread_count = 0` and the inserted
+/// message visible. We exercise this by interleaving N pairs against
+/// a shared cache from multiple tasks.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn mark_read_and_insert_message_interleave_safely() {
+    let cache = std::sync::Arc::new(Cache::open_in_memory().await.unwrap());
+    let mut c = convo("x", None);
+    c.unread_count = 5;
+    cache.upsert_conversation(&c).await.unwrap();
+
+    let mut handles = Vec::new();
+    for i in 0..10 {
+        let cache_ins = cache.clone();
+        handles.push(tokio::spawn(async move {
+            cache_ins
+                .insert_message(&msg("x", 1000 + i, "+15551112222", "hi"))
+                .await
+                .unwrap();
+        }));
+        let cache_mark = cache.clone();
+        handles.push(tokio::spawn(async move {
+            cache_mark.mark_read("x").await.unwrap();
+        }));
+    }
+    for h in handles {
+        h.await.unwrap();
+    }
+
+    // All 10 messages are present.
+    let listed = cache.list_messages("x", 100, None).await.unwrap();
+    assert_eq!(listed.len(), 10, "lost messages under interleave");
+
+    // After the dust settles a final mark_read must still zero unread.
+    cache.mark_read("x").await.unwrap();
+    let convs = cache.list_conversations().await.unwrap();
+    assert_eq!(convs[0].unread_count, 0);
+
+    // last_message_ts walked monotonically up; the highest insert ts
+    // must be reflected even though mark_read writes ran concurrently
+    // (mark_read does not touch last_message_ts).
+    let max_ts = listed.iter().map(|m| m.ts).max().unwrap();
+    assert_eq!(convs[0].last_message_ts, Some(max_ts));
+}
+
 /// Ties on `last_message_ts` are stable but unspecified at the SQL
 /// level; the contract we lock down here is "ties don't crash and
 /// don't drop rows." If the UI later wants a deterministic tie-break

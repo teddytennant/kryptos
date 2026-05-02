@@ -404,4 +404,95 @@ mod tests {
             count_after
         );
     }
+
+    /// Concurrent `send` from many tasks routes each call to the
+    /// correct backend without dropping any. Locks down that the hub's
+    /// `find` lookup is race-free under tokio scheduling.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    async fn concurrent_send_routes_every_message() {
+        let s = MockBackend::new(Backend::Signal);
+        let t = MockBackend::new(Backend::Telegram);
+        let mut hub = MessengerHub::new();
+        hub.add(s.clone());
+        hub.add(t.clone());
+        let hub = Arc::new(hub);
+
+        let mut handles = Vec::new();
+        for i in 0..32 {
+            let hub = hub.clone();
+            // Alternate backends so neither half is starved.
+            let (backend, native) = if i % 2 == 0 {
+                (Backend::Signal, "+1")
+            } else {
+                (Backend::Telegram, "9")
+            };
+            let body = format!("body-{i}");
+            handles.push(tokio::spawn(async move {
+                hub.send(&ChatId::new(backend, native), &body, &[]).await
+            }));
+        }
+        for h in handles {
+            h.await.unwrap().expect("send must succeed");
+        }
+
+        // Every send landed somewhere, total count = 32, split per backend
+        // matches the alternation pattern.
+        let s_sent = s.sent.lock().unwrap().clone();
+        let t_sent = t.sent.lock().unwrap().clone();
+        assert_eq!(s_sent.len() + t_sent.len(), 32, "lost messages");
+        assert_eq!(s_sent.len(), 16);
+        assert_eq!(t_sent.len(), 16);
+        // No body landed on the wrong backend.
+        assert!(s_sent.iter().all(|(id, _)| id.backend == Backend::Signal));
+        assert!(t_sent.iter().all(|(id, _)| id.backend == Backend::Telegram));
+    }
+
+    /// A subscriber that never reads while the producer keeps pushing
+    /// must NOT block, panic, or stall the producer. The forwarder
+    /// uses an unbounded mpsc by design (vim-fast UI loop) so the
+    /// invariant we lock down is "producer keeps making progress" —
+    /// dropping the subscriber afterwards still tears the forwarder
+    /// down cleanly. This is the closest hermetic proxy for the UI
+    /// "lagged consumer" path; if memory growth ever becomes a concern
+    /// we'll swap to a bounded mpsc + this test will need to assert
+    /// drop semantics instead.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn slow_consumer_does_not_block_producer() {
+        let a = MockBackend::new(Backend::Signal);
+        let mut hub = MessengerHub::new();
+        hub.add(a.clone());
+
+        let rx = hub.subscribe_all().await.unwrap();
+        // Settle the broadcast subscription.
+        tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+
+        // Pump 100 events. The mock's broadcast bus has cap 16, so we
+        // expect lag warnings but no producer block — `emit` is fire
+        // and forget, and the forwarder mpsc is unbounded.
+        for i in 0..100 {
+            a.emit(Event::MessageReceived(msg(
+                Backend::Signal,
+                "+1",
+                &format!("evt-{i}"),
+            )));
+        }
+        // Producer returned without us having drained anything.
+        // Drop the subscriber and confirm teardown completes. If the
+        // forwarder were stuck on the consumer we'd see receiver_count
+        // stay non-zero after drop + emit.
+        drop(rx);
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+        // One more emit: forwarder should observe consumer-gone and exit.
+        a.emit(Event::MessageReceived(msg(
+            Backend::Signal,
+            "+1",
+            "post-drop",
+        )));
+        tokio::time::sleep(std::time::Duration::from_millis(30)).await;
+        // The hub forwarder is no longer subscribed. The mock's bridge
+        // task may still be alive momentarily while it drains, but the
+        // count must not grow unboundedly.
+        let count = a.bus.receiver_count();
+        assert!(count <= 2, "unexpected receiver count after drop: {count}");
+    }
 }
