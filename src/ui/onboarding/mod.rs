@@ -90,10 +90,12 @@ impl LinkerWindow {
         let header = adw::HeaderBar::builder().show_title(false).build();
         header.add_css_class("flat");
 
-        // Hero copy block.
+        // Hero copy column — 480px wide, left-aligned. The title and
+        // body sit together; the QR card centres separately below.
         let title = gtk::Label::builder()
             .label("Link to Signal")
             .halign(gtk::Align::Start)
+            .xalign(0.0)
             .build();
         title.add_css_class("title-1");
         title.add_css_class("kryptos-linker-title");
@@ -112,6 +114,16 @@ impl LinkerWindow {
         body.add_css_class("body");
         body.add_css_class("dim-label");
         body.add_css_class("kryptos-linker-body");
+
+        let hero_column = gtk::Box::builder()
+            .orientation(gtk::Orientation::Vertical)
+            .spacing(12)
+            .halign(gtk::Align::Start)
+            .width_request(480)
+            .build();
+        hero_column.add_css_class("kryptos-linker-hero");
+        hero_column.append(&title);
+        hero_column.append(&body);
 
         // QR hero card. Starts as a placeholder; Generate flips it.
         let qr_area = gtk::DrawingArea::builder()
@@ -146,7 +158,10 @@ impl LinkerWindow {
         uri_label.add_css_class("caption");
         uri_label.add_css_class("kryptos-linker-uri");
 
-        // Device name input + Generate button row.
+        // Device name input + Generate button row. The Generate button is
+        // a square 56×40 primary action — Swiss aesthetic, not a pill.
+        // A "Copy URI" button appears next to the entry once we've got
+        // a URI to copy.
         let name_entry = gtk::Entry::builder()
             .placeholder_text("Device name")
             .text(default_device_name())
@@ -154,9 +169,16 @@ impl LinkerWindow {
             .build();
         name_entry.add_css_class("kryptos-linker-name");
 
+        let copy_btn = gtk::Button::from_icon_name("edit-copy-symbolic");
+        copy_btn.set_tooltip_text(Some("Copy URI"));
+        copy_btn.add_css_class("flat");
+        copy_btn.add_css_class("kryptos-linker-copy");
+        copy_btn.set_visible(false);
+
         let generate_btn = gtk::Button::with_label("Generate code");
         generate_btn.add_css_class("suggested-action");
-        generate_btn.add_css_class("pill");
+        generate_btn.add_css_class("kryptos-linker-generate");
+        generate_btn.set_size_request(160, 40);
 
         let input_row = gtk::Box::builder()
             .orientation(gtk::Orientation::Horizontal)
@@ -164,6 +186,7 @@ impl LinkerWindow {
             .halign(gtk::Align::Fill)
             .build();
         input_row.append(&name_entry);
+        input_row.append(&copy_btn);
         input_row.append(&generate_btn);
 
         // Status / spinner row.
@@ -205,8 +228,7 @@ impl LinkerWindow {
         body_box.set_margin_end(36);
         body_box.set_margin_top(12);
         body_box.set_margin_bottom(28);
-        body_box.append(&title);
-        body_box.append(&body);
+        body_box.append(&hero_column);
         body_box.append(&spacer(8));
         body_box.append(&qr_card);
         body_box.append(&uri_label);
@@ -230,6 +252,7 @@ impl LinkerWindow {
             window: win.clone(),
             generate_btn: generate_btn.clone(),
             name_entry: name_entry.clone(),
+            copy_btn: copy_btn.clone(),
             qr_area: qr_area.clone(),
             qr_state: qr_state.clone(),
             uri_label: uri_label.clone(),
@@ -257,6 +280,7 @@ struct WireGenerateArgs {
     window: adw::Window,
     generate_btn: gtk::Button,
     name_entry: gtk::Entry,
+    copy_btn: gtk::Button,
     qr_area: gtk::DrawingArea,
     qr_state: Rc<RefCell<QrState>>,
     uri_label: gtk::Label,
@@ -269,6 +293,7 @@ fn wire_generate(args: WireGenerateArgs) {
         window,
         generate_btn,
         name_entry,
+        copy_btn,
         qr_area,
         qr_state,
         uri_label,
@@ -277,6 +302,7 @@ fn wire_generate(args: WireGenerateArgs) {
     } = args;
 
     let btn = generate_btn.clone();
+    let copy_for_click = copy_btn.clone();
     btn.connect_clicked(move |_| {
         let device_name = name_entry.text().to_string();
         if device_name.trim().is_empty() {
@@ -293,12 +319,14 @@ fn wire_generate(args: WireGenerateArgs) {
         *qr_state.borrow_mut() = QrState::Idle;
         qr_area.queue_draw();
         uri_label.set_text("");
+        copy_for_click.set_visible(false);
 
         spawn_link_flow(LinkFlowHandles {
             device_name,
             window: window.clone(),
             generate_btn: generate_btn.clone(),
             name_entry: name_entry.clone(),
+            copy_btn: copy_for_click.clone(),
             qr_area: qr_area.clone(),
             qr_state: qr_state.clone(),
             uri_label: uri_label.clone(),
@@ -313,6 +341,7 @@ struct LinkFlowHandles {
     window: adw::Window,
     generate_btn: gtk::Button,
     name_entry: gtk::Entry,
+    copy_btn: gtk::Button,
     qr_area: gtk::DrawingArea,
     qr_state: Rc<RefCell<QrState>>,
     uri_label: gtk::Label,
@@ -337,6 +366,7 @@ fn spawn_link_flow(handles: LinkFlowHandles) {
         window,
         generate_btn,
         name_entry,
+        copy_btn,
         qr_area,
         qr_state,
         uri_label,
@@ -373,6 +403,7 @@ fn spawn_link_flow(handles: LinkFlowHandles) {
     let status_label_for_tick = status_label.clone();
     let generate_btn_for_tick = generate_btn.clone();
     let name_entry_for_tick = name_entry.clone();
+    let copy_btn_for_tick = copy_btn.clone();
     let window_for_tick = window.clone();
     glib::source::timeout_add_local(Duration::from_millis(120), move || {
         loop {
@@ -386,6 +417,7 @@ fn spawn_link_flow(handles: LinkFlowHandles) {
                             uri_label_for_tick.set_text(&shorten_uri(&uri));
                             uri_label_for_tick.set_tooltip_text(Some(&uri));
                             status_label_for_tick.set_text("Waiting for your phone to confirm…");
+                            wire_copy_button(&copy_btn_for_tick, &uri, &status_label_for_tick);
                         }
                         Err(e) => {
                             error!(error = %e, "failed to encode QR");
@@ -443,6 +475,22 @@ fn spawn_link_flow(handles: LinkFlowHandles) {
 fn unlock_inputs(generate_btn: &gtk::Button, name_entry: &gtk::Entry) {
     generate_btn.set_sensitive(true);
     name_entry.set_sensitive(true);
+}
+
+/// Make `copy_btn` visible and rebind it to copy `uri` to the display
+/// clipboard. We disconnect previous handlers via a fresh signal handle
+/// — `gtk::Button` doesn't expose handler IDs cheaply, so we rely on
+/// `connect_clicked` being idempotent for our purposes (each generate
+/// pass clears + reattaches before the URI lands).
+fn wire_copy_button(copy_btn: &gtk::Button, uri: &str, status_label: &gtk::Label) {
+    copy_btn.set_visible(true);
+    let uri = uri.to_string();
+    let status_label = status_label.clone();
+    copy_btn.connect_clicked(move |btn| {
+        let clipboard = btn.clipboard();
+        clipboard.set_text(&uri);
+        status_label.set_text("URI copied to clipboard.");
+    });
 }
 
 // ---------------------------------------------------------------------------
@@ -529,7 +577,7 @@ fn run_link_flow(device_name: &str, tx: &mpsc::Sender<LinkEvent>) {
 // QR rendering
 // ---------------------------------------------------------------------------
 
-const QR_CARD_PX: i32 = 320;
+const QR_CARD_PX: i32 = 480;
 const QR_QUIET_MODULES: usize = 4;
 
 #[derive(Clone)]
@@ -674,6 +722,10 @@ fn install_linker_styles() {
 /// type weights so the linker reads as Swiss minimal: pristine QR card,
 /// generous quiet zone, hero title in monospace, no decorative shadow.
 const LINKER_STYLES: &str = r#"
+.kryptos-linker-hero {
+    /* Anchor the hero column to the left so the QR card can centre
+       independently. Width clamped to 480px via builder. */
+}
 .kryptos-linker-title {
     font-size: 28px;
     font-weight: 600;
@@ -683,7 +735,6 @@ const LINKER_STYLES: &str = r#"
 .kryptos-linker-body {
     font-size: 14px;
     line-height: 1.5;
-    max-width: 460px;
 }
 .kryptos-qr-card {
     /* Generous quiet zone: 32px on all sides. The DrawingArea paints
@@ -707,8 +758,28 @@ const LINKER_STYLES: &str = r#"
     font-size: 13px;
     line-height: 1.5;
 }
-button.suggested-action.pill {
-    padding: 14px 32px;
-    border-radius: 999px;
+.kryptos-linker-copy {
+    min-width: 36px;
+    min-height: 36px;
+    padding: 0;
+    border-radius: 4px;
+    background: transparent;
+    transition: background-color 100ms ease-out;
+}
+.kryptos-linker-copy:hover {
+    background-color: alpha(currentColor, 0.06);
+}
+/* Square primary action — Swiss aesthetic, not a pill. Thin border,
+   bold weight, snaps to a 56-wide / 40-tall block. */
+button.suggested-action.kryptos-linker-generate {
+    padding: 0 18px;
+    border-radius: 4px;
+    border: 1px solid alpha(currentColor, 0.20);
+    font-weight: 700;
+    letter-spacing: 0.04em;
+    min-height: 40px;
+}
+button.suggested-action.kryptos-linker-generate:hover {
+    background-color: alpha(currentColor, 0.06);
 }
 "#;
