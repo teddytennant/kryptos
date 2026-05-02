@@ -34,8 +34,8 @@ use crate::config::{loader, Config};
 use crate::core::Result;
 use crate::dbus::SignalClient;
 use crate::messenger::{
-    signal::SignalBackend, ChatId, ConversationSummary, Event as MEvent, MessengerHub,
-    NormalizedMessage,
+    signal::SignalBackend, telegram::TelegramBackend, ChatId, ConversationSummary,
+    Event as MEvent, MessengerHub, NormalizedMessage,
 };
 use crate::theme::ThemeManager;
 use crate::vim::{Engine, KeySym, KeymapSet, Mode, Outcome};
@@ -96,10 +96,20 @@ impl AsyncCtx {
                 Err(e) => warn!(error = %e, "signal backend init failed"),
             }
         }
-        // Telegram: backend is wired but interactive login UI lives in a
-        // separate task. Leave it out of the auto-init path; users who
-        // want it can flip the schema's `[backends.telegram]` once
-        // login lands.
+        // Telegram: attach only when the user has both flipped
+        // `[backends.telegram].enabled = true` and completed the
+        // interactive login (session file exists + grammers reports
+        // is_authorized()). Otherwise log a hint pointing them at
+        // `:telegram-login` so they're not stuck guessing.
+        if cfg.backends.telegram.enabled {
+            match runtime.block_on(build_telegram_backend(&cfg.backends.telegram)) {
+                Ok(Some(backend)) => hub.add(backend),
+                Ok(None) => info!(
+                    "telegram backend enabled but not authorized; run :telegram-login"
+                ),
+                Err(e) => warn!(error = %e, "telegram backend init failed"),
+            }
+        }
 
         Some(Arc::new(Self {
             runtime,
@@ -112,6 +122,23 @@ impl AsyncCtx {
 async fn open_cache() -> Result<Cache> {
     let path = Cache::default_path()?;
     Cache::open(&path).await
+}
+
+async fn build_telegram_backend(
+    cfg: &crate::config::schema::TelegramBackendConfig,
+) -> Result<Option<Arc<TelegramBackend>>> {
+    if cfg.api_id == 0 || cfg.api_hash.is_empty() {
+        // Login never happened; leave the backend off and let the user
+        // run `:telegram-login`. We do *not* persist anything here.
+        return Ok(None);
+    }
+    let session_path = crate::messenger::telegram::resolve_session_path(&cfg.session_path);
+    let backend = TelegramBackend::open(cfg.api_id, &cfg.api_hash, &session_path).await?;
+    if !backend.is_authorized().await {
+        debug!("telegram session present but not authorized");
+        return Ok(None);
+    }
+    Ok(Some(Arc::new(backend)))
 }
 
 async fn build_signal_backend() -> Result<Option<Arc<SignalBackend>>> {
@@ -156,13 +183,6 @@ fn activate(app: &adw::Application) {
             Config::default()
         }
     };
-
-    if cfg.backends.telegram.enabled {
-        warn!(
-            "Telegram backend is enabled in config but requires manual login — \
-             use `:telegram-login` (TODO)"
-        );
-    }
 
     let parts = window::build(app, &cfg);
 
