@@ -1,0 +1,47 @@
+# SigVim configuration — copy to ~/.config/sigvim/config.toml.
+# Saving the file triggers a hot-reload; no restart required.
+
+[general]
+# Built-in: "catppuccin-mocha", "catppuccin-latte", "gruvbox", "tokyo-night",
+# "system" (follow GTK light/dark), or any name registered via :theme.
+theme = "catppuccin-mocha"
+# Leader prefix for compound bindings (e.g. <Space>c -> compose_new).
+leader_key = "<Space>"
+# Open the window maximised at launch.
+start_maximized = true
+# Enable Hyprland blur via ext-session-lock / wlr-layer-shell hints.
+hyprland_blur = true
+
+[keymap.normal]
+"j" = "navigate_down"
+"k" = "navigate_up"
+"h" = "sidebar_focus"
+"l" = "messages_focus"
+"gg" = "scroll_top"
+"G" = "scroll_bottom"
+"<Space>c" = "compose_new"
+"<Space>r" = "reply"
+"dd" = "archive_chat"
+"yy" = "copy_message"
+"x" = "delete_message"
+"/" = "search"
+":" = "command_palette"
+
+[keymap.insert]
+"<Esc>" = "leave_insert"
+"<C-Enter>" = "send_message"
+
+[keymap.command]
+"q" = "quit"
+"theme" = "set_theme"             # :theme catppuccin-latte
+"reload" = "reload_config"
+
+[notifications]
+enabled = true
+sound = "default"
+# Per-chat DND overrides global notifications.
+dnd_per_chat = true
+
+[appearance]
+font = "Inter 11"
+message_bubbles = true

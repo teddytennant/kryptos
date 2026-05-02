@@ -2,8 +2,10 @@
 //!
 //! Top-level crate root. Modules are split by responsibility:
 //!
-//! - [`core`] — shared error type, logging.
-//! - [`ui`]   — gtk4 + libadwaita view layer.
+//! - [`config`] — parse and watch `~/.config/sigvim/config.toml`.
+//! - [`core`]   — shared error type, logging.
+//! - [`ui`]     — gtk4 + libadwaita view layer.
 
+pub mod config;
 pub mod core;
 pub mod ui;
