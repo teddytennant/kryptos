@@ -230,3 +230,274 @@ textview.composer,
   background-color: @kryptos_bg;
   border-top: 1px solid @kryptos_overlay;
 }
+
+/* ----- Visual polish (shared block, palette-driven) ----------------------- */
+
+/* Sidebar header & search */
+
+.sidebar-header,
+.sidebar headerbar {
+  background-color: @kryptos_mantle;
+  border-bottom: 1px solid alpha(@kryptos_surface2, 0.5);
+}
+
+.sidebar-search {
+  background-color: alpha(@kryptos_surface, 0.6);
+  border: 1px solid alpha(@kryptos_surface2, 0.6);
+  border-radius: 8px;
+  padding: 4px 8px;
+  margin: 6px 10px 8px;
+  caret-color: @kryptos_accent;
+  transition: border-color 120ms ease-out, background-color 120ms ease-out;
+}
+
+.sidebar-search:focus-within {
+  border-color: @kryptos_accent;
+  background-color: alpha(@kryptos_surface, 0.85);
+}
+
+/* Chat row — two-line designed list */
+
+.kryptos-chat-row,
+listbox.navigation-sidebar > row {
+  padding: 12px 16px;
+  transition: background-color 120ms ease-out;
+}
+
+.kryptos-chat-row .chat-avatar {
+  min-width: 36px;
+  min-height: 36px;
+  border-radius: 18px;
+  background-color: alpha(@kryptos_accent, 0.22);
+  color: @kryptos_accent;
+  font-size: 13px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+}
+
+.kryptos-chat-row .chat-name {
+  font-size: 14px;
+  font-weight: 600;
+  color: @kryptos_fg;
+}
+
+.kryptos-chat-row .chat-preview {
+  font-size: 12px;
+  font-weight: 400;
+  opacity: 0.7;
+  color: @kryptos_subtle;
+}
+
+.kryptos-chat-row .chat-timestamp {
+  font-size: 11px;
+  font-weight: 500;
+  opacity: 0.55;
+  color: @kryptos_subtle;
+  font-feature-settings: "tnum" 1;
+}
+
+.kryptos-chat-row:selected .chat-name,
+listbox.navigation-sidebar > row:selected .chat-name {
+  color: @kryptos_fg;
+}
+
+.kryptos-chat-row:selected .chat-avatar,
+listbox.navigation-sidebar > row:selected .chat-avatar {
+  background-color: alpha(@kryptos_accent, 0.32);
+}
+
+/* Content header */
+
+.chat-presence {
+  font-size: 11px;
+  font-weight: 500;
+  opacity: 0.6;
+  letter-spacing: 0.02em;
+}
+
+/* Messages */
+
+.message-row {
+  margin: 2px 0;
+}
+
+.message-sender {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  opacity: 0.55;
+  margin: 4px 4px 2px;
+}
+
+.message-row.mine .message-sender {
+  color: @kryptos_accent;
+}
+
+.message-timestamp {
+  font-size: 11px;
+  font-weight: 500;
+  opacity: 0;
+  color: @kryptos_subtle;
+  margin: 2px 4px 0;
+  font-feature-settings: "tnum" 1;
+  transition: opacity 150ms ease-out;
+}
+
+.message-row:hover .message-timestamp {
+  opacity: 0.6;
+}
+
+.bubble {
+  border-radius: 16px;
+  padding: 9px 14px;
+  box-shadow: 0 1px 2px rgba(0,0,0,0.10);
+  transition: box-shadow 150ms ease-out;
+}
+
+.bubble-mine {
+  background-color: alpha(@kryptos_accent, 0.85);
+  color: @kryptos_mantle;
+}
+
+.bubble-theirs {
+  background-color: @kryptos_surface;
+  color: @kryptos_fg;
+}
+
+/* Composer — frame, focus ring, and pill mode badge */
+
+.composer-frame {
+  border-radius: 12px;
+  border: 1px solid alpha(@kryptos_surface2, 0.6);
+  background-color: alpha(@kryptos_mantle, 0.6);
+  margin: 8px 12px 12px;
+  padding: 0;
+  transition: border-color 150ms ease-out, box-shadow 150ms ease-out;
+}
+
+.composer-frame:focus-within {
+  border-color: @kryptos_accent;
+  box-shadow: 0 0 0 3px alpha(@kryptos_accent, 0.18);
+}
+
+.kryptos-composer,
+.composer-frame textview {
+  background-color: transparent;
+  padding: 8px 4px;
+  border: none;
+  border-top: none;
+}
+
+.composer-mode-badge {
+  font-family: "JetBrains Mono", "Fira Code", monospace;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.10em;
+  text-transform: uppercase;
+  padding: 2px 8px 2px 6px;
+  border-radius: 999px;
+  background-color: alpha(@kryptos_accent, 0.18);
+  color: @kryptos_accent;
+}
+
+.composer-insert .composer-mode-badge {
+  background-color: alpha(@kryptos_green, 0.20);
+  color: @kryptos_green;
+}
+
+.composer-visual .composer-mode-badge {
+  background-color: alpha(@kryptos_yellow, 0.20);
+  color: @kryptos_yellow;
+}
+
+.composer-mode-dot {
+  font-size: 12px;
+  margin-right: 4px;
+  opacity: 0.85;
+}
+
+/* Mode line — three sections, neovim-style */
+
+.kryptos-modeline,
+.mode-line-row {
+  padding: 0;
+  background-color: @kryptos_mantle;
+  border-top: 1px solid alpha(@kryptos_surface2, 0.6);
+  min-height: 24px;
+}
+
+.modeline-section {
+  font-family: "JetBrains Mono", "Fira Code", monospace;
+  font-size: 12px;
+  padding: 4px 12px;
+}
+
+.modeline-section.left {
+  padding: 0;
+}
+
+.modeline-mode-block {
+  font-family: "JetBrains Mono", "Fira Code", monospace;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.10em;
+  text-transform: uppercase;
+  padding: 4px 14px;
+  color: @kryptos_mantle;
+  background-color: @kryptos_blue;
+}
+
+.modeline-mode-block.mode-normal { background-color: @kryptos_blue;   color: @kryptos_mantle; }
+.modeline-mode-block.mode-insert { background-color: @kryptos_green;  color: @kryptos_mantle; }
+.modeline-mode-block.mode-command { background-color: @kryptos_yellow; color: @kryptos_mantle; }
+.modeline-mode-block.mode-search { background-color: @kryptos_red;    color: @kryptos_mantle; }
+
+.modeline-section.center {
+  color: @kryptos_fg;
+  opacity: 0.85;
+}
+
+.modeline-section.right {
+  color: @kryptos_subtle;
+  opacity: 0.75;
+  font-feature-settings: "tnum" 1;
+}
+
+.modeline-separator {
+  color: alpha(@kryptos_subtle, 0.4);
+  padding: 0 6px;
+}
+
+/* Empty state */
+
+.empty-state {
+  padding: 32px 24px;
+}
+
+.empty-state-glyph {
+  font-size: 64px;
+  opacity: 0.18;
+  color: @kryptos_accent;
+}
+
+.empty-state-title {
+  font-size: 15px;
+  font-weight: 600;
+  color: @kryptos_fg;
+  opacity: 0.7;
+}
+
+.empty-state-subtitle {
+  font-size: 12px;
+  font-weight: 400;
+  color: @kryptos_subtle;
+  opacity: 0.7;
+}
+
+/* Header bar info / compose icon buttons */
+
+headerbar button.flat {
+  border-radius: 999px;
+  transition: background-color 120ms ease-out;
+}
