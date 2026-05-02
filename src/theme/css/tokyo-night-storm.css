@@ -1,0 +1,77 @@
+/* Tokyo Night Storm — https://github.com/folke/tokyonight.nvim */
+
+@define-color kryptos_bg       #24283b;
+@define-color kryptos_mantle   #1f2335;
+@define-color kryptos_surface  #2e3450;
+@define-color kryptos_surface2 #3b4261;
+@define-color kryptos_overlay  #565f89;
+@define-color kryptos_fg       #c0caf5;
+@define-color kryptos_subtle   #a9b1d6;
+@define-color kryptos_accent   #bb9af7;
+@define-color kryptos_blue     #7aa2f7;
+@define-color kryptos_green    #9ece6a;
+@define-color kryptos_yellow   #e0af68;
+@define-color kryptos_red      #f7768e;
+@define-color kryptos_lavender #bb9af7;
+
+window {
+  background-color: @kryptos_bg;
+  color: @kryptos_fg;
+}
+
+headerbar {
+  background-color: @kryptos_mantle;
+  color: @kryptos_fg;
+  border-bottom: 1px solid @kryptos_surface;
+  box-shadow: none;
+}
+
+box.sidebar {
+  background-color: @kryptos_mantle;
+  border-right: 1px solid @kryptos_surface;
+}
+
+listview row {
+  background-color: transparent;
+  color: @kryptos_fg;
+  padding: 6px 10px;
+}
+
+listview row:hover {
+  background-color: alpha(@kryptos_surface, 0.6);
+}
+
+listview row:selected {
+  background-color: @kryptos_surface;
+  color: @kryptos_fg;
+}
+
+textview, textview text {
+  background-color: @kryptos_bg;
+  color: @kryptos_fg;
+  caret-color: @kryptos_accent;
+}
+
+textview text selection {
+  background-color: alpha(@kryptos_accent, 0.35);
+  color: @kryptos_fg;
+}
+
+entry {
+  background-color: @kryptos_mantle;
+  color: @kryptos_fg;
+  border: 1px solid @kryptos_surface;
+  border-radius: 4px;
+  padding: 4px 8px;
+  caret-color: @kryptos_accent;
+}
+
+entry:focus {
+  border-color: @kryptos_accent;
+  outline: none;
+}
+
+.modeline.normal   { background-color: @kryptos_green;    color: @kryptos_bg; padding: 2px 8px; font-weight: bold; }
+.modeline.insert   { background-color: @kryptos_blue;     color: @kryptos_bg; padding: 2px 8px; font-weight: bold; }
+.modeline.command  { background-color: @kryptos_lavender; color: @kryptos_bg; padding: 2px 8px; font-weight: bold; }
+.modeline.search   { background-color: @kryptos_yellow;   color: @kryptos_bg; padding: 2px 8px; font-weight: bold; }
