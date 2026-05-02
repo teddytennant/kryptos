@@ -34,6 +34,7 @@ built-in theme and tweak from there.
 - **Everforest** (dark medium / dark soft / light medium / light soft) —
   https://github.com/sainnhe/everforest
 - **Rose Pine** (main / Moon / Dawn) — https://rosepinetheme.com
+- **Nord** (dark) — https://nordtheme.com
 
 If a hex value here drifts from the upstream spec, the upstream spec wins —
 file a bug.
