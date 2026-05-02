@@ -53,6 +53,10 @@ message_bubbles = true
 # Telegram support uses grammers-client and is opt-in.
 [backends.signal]
 enabled = true
+# E.164 phone number this Kryptos instance is signed in as. Leave empty
+# to auto-detect from `signal-cli list-accounts` when there's exactly
+# one local account.
+account = ""
 
 [backends.telegram]
 enabled = false

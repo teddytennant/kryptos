@@ -86,13 +86,19 @@ pub struct Backends {
 #[serde(default, deny_unknown_fields)]
 pub struct SignalBackendConfig {
     pub enabled: bool,
+    /// E.164 phone number this Kryptos instance is signed in as.
+    /// Empty string means "auto-detect from `signal-cli list-accounts`".
+    pub account: String,
 }
 
 impl Default for SignalBackendConfig {
     fn default() -> Self {
         // Signal is the original backend; default to on so existing
         // configs without a [backends.signal] block keep working.
-        Self { enabled: true }
+        Self {
+            enabled: true,
+            account: String::new(),
+        }
     }
 }
 
