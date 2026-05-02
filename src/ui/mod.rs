@@ -27,7 +27,7 @@ use tracing::{error, info, warn};
 
 use crate::config::{loader, Config};
 use crate::theme::ThemeManager;
-use crate::vim::{Engine, KeymapSet, KeySym, Mode, Outcome};
+use crate::vim::{Engine, KeySym, KeymapSet, Mode, Outcome};
 
 use dispatcher::Dispatcher;
 use window::WindowParts;
@@ -36,9 +36,7 @@ const APP_ID: &str = "dev.kryptos.Kryptos";
 
 /// Run the libadwaita application loop. Returns the glib exit code.
 pub fn run() -> glib::ExitCode {
-    let app = adw::Application::builder()
-        .application_id(APP_ID)
-        .build();
+    let app = adw::Application::builder().application_id(APP_ID).build();
 
     app.connect_activate(activate);
     app.run()
@@ -156,24 +154,18 @@ fn maybe_open_first_run_linker(window: &adw::ApplicationWindow) {
         .expect("spawn first-run probe thread");
 
     let win = window.clone();
-    glib::source::timeout_add_local(Duration::from_millis(150), move || {
-        match rx.try_recv() {
-            Ok(true) => {
-                onboarding::open_linker(&win);
-                glib::ControlFlow::Break
-            }
-            Ok(false) => glib::ControlFlow::Break,
-            Err(mpsc::TryRecvError::Empty) => glib::ControlFlow::Continue,
-            Err(mpsc::TryRecvError::Disconnected) => glib::ControlFlow::Break,
+    glib::source::timeout_add_local(Duration::from_millis(150), move || match rx.try_recv() {
+        Ok(true) => {
+            onboarding::open_linker(&win);
+            glib::ControlFlow::Break
         }
+        Ok(false) => glib::ControlFlow::Break,
+        Err(mpsc::TryRecvError::Empty) => glib::ControlFlow::Continue,
+        Err(mpsc::TryRecvError::Disconnected) => glib::ControlFlow::Break,
     });
 }
 
-fn wire_command_bar(
-    parts: &WindowParts,
-    dispatcher: &Dispatcher,
-    engine: Rc<RefCell<Engine>>,
-) {
+fn wire_command_bar(parts: &WindowParts, dispatcher: &Dispatcher, engine: Rc<RefCell<Engine>>) {
     // Activate (Enter) — commit and return to Normal.
     let entry = parts.command_bar.entry().clone();
     let bar = parts.command_bar.clone();

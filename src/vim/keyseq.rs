@@ -92,10 +92,7 @@ mod tests {
             p("<Space>c"),
             KeySeq::new([Key::named("Space"), Key::char('c')])
         );
-        assert_eq!(
-            p("<leader>r"),
-            KeySeq::new([Key::leader(), Key::char('r')])
-        );
+        assert_eq!(p("<leader>r"), KeySeq::new([Key::leader(), Key::char('r')]));
         assert_eq!(
             p("<C-x><C-c>"),
             KeySeq::new([

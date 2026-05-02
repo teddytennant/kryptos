@@ -70,9 +70,7 @@ pub const ALL: &[Builtin] = &[
 /// treat that name specially.
 pub fn lookup(name: &str) -> Option<Builtin> {
     let needle = name.trim().to_ascii_lowercase();
-    ALL.iter()
-        .copied()
-        .find(|b| b.canonical_name == needle)
+    ALL.iter().copied().find(|b| b.canonical_name == needle)
 }
 
 pub fn known_names() -> Vec<&'static str> {

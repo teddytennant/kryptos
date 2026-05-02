@@ -51,11 +51,7 @@ impl ComposerMode {
     }
 }
 
-const ALL_MODE_CLASSES: &[&str] = &[
-    "composer-normal",
-    "composer-insert",
-    "composer-visual",
-];
+const ALL_MODE_CLASSES: &[&str] = &["composer-normal", "composer-insert", "composer-visual"];
 
 type SendCallback = Box<dyn Fn(String)>;
 
@@ -157,7 +153,8 @@ impl Composer {
         // API for that on TextView; CSS `.caret-color` only changes the
         // color, not the shape. Left as-is so themes can hint via
         // border/outline on the wrapper.
-        self.text_view.set_editable(matches!(m, ComposerMode::Insert));
+        self.text_view
+            .set_editable(matches!(m, ComposerMode::Insert));
         if matches!(m, ComposerMode::Visual | ComposerMode::VisualLine) {
             self.anchor_visual_selection(m);
         }
@@ -737,7 +734,10 @@ mod tests {
     #[test]
     fn visual_keys() {
         assert_eq!(next_mode_for_normal_key('v'), Some(ComposerMode::Visual));
-        assert_eq!(next_mode_for_normal_key('V'), Some(ComposerMode::VisualLine));
+        assert_eq!(
+            next_mode_for_normal_key('V'),
+            Some(ComposerMode::VisualLine)
+        );
     }
 
     #[test]

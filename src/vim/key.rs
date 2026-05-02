@@ -127,9 +127,7 @@ impl FromStr for Key {
             let mut chars = s.chars();
             let c = chars.next().unwrap();
             if chars.next().is_some() {
-                return Err(Error::Config(format!(
-                    "multi-char key without <…>: {s:?}"
-                )));
+                return Err(Error::Config(format!("multi-char key without <…>: {s:?}")));
             }
             return Ok(Key::char(c));
         }
@@ -254,7 +252,15 @@ mod tests {
 
     #[test]
     fn display_roundtrips() {
-        for s in ["j", "<Esc>", "<Enter>", "<Space>", "<C-Enter>", "<C-S-x>", "<F1>"] {
+        for s in [
+            "j",
+            "<Esc>",
+            "<Enter>",
+            "<Space>",
+            "<C-Enter>",
+            "<C-S-x>",
+            "<F1>",
+        ] {
             assert_eq!(p(s).to_string(), s, "roundtrip for {s}");
         }
     }

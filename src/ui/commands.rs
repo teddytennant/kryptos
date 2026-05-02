@@ -94,7 +94,11 @@ fn parse_set(rest: &str) -> Command {
 
 /// Apply a `:set key [= value]` to a `Config` in-place. Pure so tests
 /// can verify field updates without disk / GTK.
-pub fn apply_set(cfg: &mut Config, key: &str, value: Option<&str>) -> std::result::Result<String, String> {
+pub fn apply_set(
+    cfg: &mut Config,
+    key: &str,
+    value: Option<&str>,
+) -> std::result::Result<String, String> {
     match key {
         "theme" => {
             let v = value.ok_or_else(|| "`:set theme = <name>` requires a value".to_string())?;
@@ -194,7 +198,10 @@ mod tests {
 
     #[test]
     fn unknown_command_carries_head() {
-        assert_eq!(parse_command("doesnotexist"), Command::Unknown("doesnotexist".into()));
+        assert_eq!(
+            parse_command("doesnotexist"),
+            Command::Unknown("doesnotexist".into())
+        );
         assert_eq!(parse_command("foo bar baz"), Command::Unknown("foo".into()));
     }
 

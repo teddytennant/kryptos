@@ -295,7 +295,9 @@ fn spawn_version_probe(row: adw::ActionRow) {
                     .enable_all()
                     .build()
                     .map_err(|e| Error::Config(format!("runtime: {e}")))
-                    .and_then(|rt| rt.block_on(async { SignalClient::connect().await?.version().await }))
+                    .and_then(|rt| {
+                        rt.block_on(async { SignalClient::connect().await?.version().await })
+                    })
             });
             let value = match result {
                 Ok(Ok(v)) => v,
@@ -312,17 +314,15 @@ fn spawn_version_probe(row: adw::ActionRow) {
         })
         .expect("spawn prefs version probe thread");
 
-    glib::source::timeout_add_local(Duration::from_millis(150), move || {
-        match rx.try_recv() {
-            Ok(value) => {
-                row.set_subtitle(&value);
-                glib::ControlFlow::Break
-            }
-            Err(std::sync::mpsc::TryRecvError::Empty) => glib::ControlFlow::Continue,
-            Err(std::sync::mpsc::TryRecvError::Disconnected) => {
-                row.set_subtitle("n/a");
-                glib::ControlFlow::Break
-            }
+    glib::source::timeout_add_local(Duration::from_millis(150), move || match rx.try_recv() {
+        Ok(value) => {
+            row.set_subtitle(&value);
+            glib::ControlFlow::Break
+        }
+        Err(std::sync::mpsc::TryRecvError::Empty) => glib::ControlFlow::Continue,
+        Err(std::sync::mpsc::TryRecvError::Disconnected) => {
+            row.set_subtitle("n/a");
+            glib::ControlFlow::Break
         }
     });
 }

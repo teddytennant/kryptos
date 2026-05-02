@@ -99,10 +99,7 @@ mod tests {
     fn bind_and_match_single_char() {
         let mut m = Keymap::new();
         m.bind(seq("j"), Action::NavigateDown).unwrap();
-        assert_eq!(
-            m.lookup(&[k("j")]),
-            Lookup::Match(Action::NavigateDown)
-        );
+        assert_eq!(m.lookup(&[k("j")]), Lookup::Match(Action::NavigateDown));
         assert_eq!(m.lookup(&[k("k")]), Lookup::None);
     }
 
@@ -138,10 +135,7 @@ mod tests {
         let mut m = Keymap::new();
         m.bind(seq("q"), Action::Quit).unwrap();
         m.bind(seq("q"), Action::ReloadConfig).unwrap();
-        assert_eq!(
-            m.lookup(&[k("q")]),
-            Lookup::Match(Action::ReloadConfig)
-        );
+        assert_eq!(m.lookup(&[k("q")]), Lookup::Match(Action::ReloadConfig));
     }
 
     #[test]

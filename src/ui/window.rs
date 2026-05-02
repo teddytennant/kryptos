@@ -136,7 +136,12 @@ fn build_sidebar_list() -> gtk::ListBox {
 /// preview (dim) on the bottom. `chat-row`-class is on the outer row so
 /// the palette CSS can paint hover, selection, and the accent stripe.
 fn chat_row(name: &str, preview: &str, timestamp: &str) -> gtk::ListBoxRow {
-    let initial = name.chars().next().unwrap_or('?').to_uppercase().to_string();
+    let initial = name
+        .chars()
+        .next()
+        .unwrap_or('?')
+        .to_uppercase()
+        .to_string();
     let avatar = gtk::Label::builder()
         .label(&initial)
         .xalign(0.5)
@@ -154,10 +159,7 @@ fn chat_row(name: &str, preview: &str, timestamp: &str) -> gtk::ListBoxRow {
         .build();
     name_label.add_css_class("chat-name");
 
-    let ts_label = gtk::Label::builder()
-        .label(timestamp)
-        .xalign(1.0)
-        .build();
+    let ts_label = gtk::Label::builder().label(timestamp).xalign(1.0).build();
     ts_label.add_css_class("chat-timestamp");
 
     let top_row = gtk::Box::builder()
@@ -239,7 +241,13 @@ fn build_sidebar(list: &gtk::ListBox, search: &gtk::SearchEntry) -> gtk::Widget 
     toolbar.upcast::<gtk::Widget>()
 }
 
-fn build_content() -> (gtk::Widget, adw::WindowTitle, Composer, gtk::Button, gtk::Button) {
+fn build_content() -> (
+    gtk::Widget,
+    adw::WindowTitle,
+    Composer,
+    gtk::Button,
+    gtk::Button,
+) {
     let title = adw::WindowTitle::new(PLACEHOLDER_CHATS[0].0, "");
     let header = adw::HeaderBar::builder().title_widget(&title).build();
     header.add_css_class("flat");
@@ -294,7 +302,13 @@ fn build_content() -> (gtk::Widget, adw::WindowTitle, Composer, gtk::Button, gtk
     let toolbar = adw::ToolbarView::new();
     toolbar.add_top_bar(&header);
     toolbar.set_content(Some(&body));
-    (toolbar.upcast::<gtk::Widget>(), title, composer, prefs_button, link_button)
+    (
+        toolbar.upcast::<gtk::Widget>(),
+        title,
+        composer,
+        prefs_button,
+        link_button,
+    )
 }
 
 /// One message bubble in a row. Real chat apps don't shout "THEM" /
@@ -315,7 +329,11 @@ fn message_row(mine: bool, body: &str, timestamp: &str) -> gtk::Widget {
         .orientation(gtk::Orientation::Horizontal)
         .build();
     row.add_css_class("message-row");
-    row.set_halign(if mine { gtk::Align::End } else { gtk::Align::Start });
+    row.set_halign(if mine {
+        gtk::Align::End
+    } else {
+        gtk::Align::Start
+    });
     row.append(&label);
     row.upcast::<gtk::Widget>()
 }
@@ -453,4 +471,3 @@ pub fn move_sidebar_selection(list: &gtk::ListBox, delta: i32) {
         row.grab_focus();
     }
 }
-

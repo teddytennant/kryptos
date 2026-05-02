@@ -120,9 +120,6 @@ mod tests {
     #[test]
     fn display_uses_name() {
         assert_eq!(Action::Quit.to_string(), "quit");
-        assert_eq!(
-            Action::Custom("xyz".into()).to_string(),
-            "xyz"
-        );
+        assert_eq!(Action::Custom("xyz".into()).to_string(), "xyz");
     }
 }

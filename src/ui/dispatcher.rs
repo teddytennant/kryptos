@@ -248,4 +248,3 @@ fn first_label_text(widget: &gtk::Widget) -> Option<String> {
     }
     None
 }
-

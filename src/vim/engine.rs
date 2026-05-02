@@ -215,8 +215,7 @@ mod tests {
 
     #[test]
     fn keymap_set_built_from_example_config() {
-        let cfg: Config =
-            toml::from_str(include_str!("../../config.example.toml")).unwrap();
+        let cfg: Config = toml::from_str(include_str!("../../config.example.toml")).unwrap();
         let set = KeymapSet::from_config(&cfg).unwrap();
         // Every binding in the example config should be present.
         assert_eq!(set.normal.len(), cfg.keymap.normal.len());

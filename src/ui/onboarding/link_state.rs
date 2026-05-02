@@ -20,10 +20,7 @@ pub enum LinkOutcome {
 /// decide whether the link finished. The first new entry wins —
 /// signal-cli only links one account per `link()` call, but if a user
 /// somehow added two between polls we still pick *something* sensible.
-pub fn detect_new_account(
-    before: &HashSet<String>,
-    now: &[String],
-) -> LinkOutcome {
+pub fn detect_new_account(before: &HashSet<String>, now: &[String]) -> LinkOutcome {
     for account in now {
         if !before.contains(account) {
             return LinkOutcome::Linked(account.clone());
@@ -68,10 +65,7 @@ mod tests {
     #[test]
     fn detects_added_account_among_existing() {
         let before = set(&["+14155552671"]);
-        let now = vec![
-            "+14155552671".to_string(),
-            "+15555550001".to_string(),
-        ];
+        let now = vec!["+14155552671".to_string(), "+15555550001".to_string()];
         assert_eq!(
             detect_new_account(&before, &now),
             LinkOutcome::Linked("+15555550001".to_string())

@@ -63,11 +63,7 @@ impl ConfigWatcher {
     }
 }
 
-fn worker(
-    raw_rx: StdReceiver<notify::Result<Event>>,
-    target: PathBuf,
-    tx: watch::Sender<Config>,
-) {
+fn worker(raw_rx: StdReceiver<notify::Result<Event>>, target: PathBuf, tx: watch::Sender<Config>) {
     while let Ok(first) = raw_rx.recv() {
         if !is_relevant(&first, &target) {
             continue;
