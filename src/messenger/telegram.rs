@@ -581,6 +581,21 @@ pub(crate) mod test_helpers {
     pub fn fake_raw_update() -> Update {
         Update::Raw(tl::enums::Update::AttachMenuBots)
     }
+
+    /// Wrap a `UpdateDeleteMessages` inside `Update::Raw`. Models the
+    /// "TL-level delete that grammers' `Update::new` would have lifted
+    /// to `MessageDeleted` for us, but in some flows we receive raw."
+    /// We use it to lock in that the wildcard arm of `update_to_event`
+    /// drops it without crashing on the parsed payload.
+    pub fn fake_raw_delete_messages(messages: Vec<i32>) -> Update {
+        Update::Raw(tl::enums::Update::DeleteMessages(
+            tl::types::UpdateDeleteMessages {
+                messages,
+                pts: 0,
+                pts_count: 1,
+            },
+        ))
+    }
 }
 
 #[cfg(test)]
@@ -730,6 +745,38 @@ mod tests {
         // protects us from `non_exhaustive` additions, so prove the
         // `Update::Raw` path returns None as a stand-in.
         let raw = test_helpers::fake_raw_update();
+        assert!(update_to_event(raw).is_none());
+    }
+
+    /// `Update::Raw(UpdateDeleteMessages)` carries 1:1 deletes (no
+    /// channel context). Per the design comment in `update_to_event`,
+    /// raw passthroughs return None — the deleted-in-1:1 path also
+    /// returns None when reached via the friendly variant because
+    /// `channel_id` is absent. Both paths share the "drop" outcome.
+    #[test]
+    fn update_to_event_drops_raw_delete_messages() {
+        let raw = test_helpers::fake_raw_delete_messages(vec![1, 2, 3]);
+        assert!(update_to_event(raw).is_none());
+    }
+
+    /// Empty deletion list still drops cleanly — the fall-through arm
+    /// must not assume non-empty payloads, since the wildcard catches
+    /// every other Raw variant.
+    #[test]
+    fn update_to_event_drops_empty_raw_delete_messages() {
+        let raw = test_helpers::fake_raw_delete_messages(vec![]);
+        assert!(update_to_event(raw).is_none());
+    }
+
+    /// A Raw variant we haven't special-cased (channel-edit flavour)
+    /// must also drop. We can't reach the friendly `MessageEdited`
+    /// arm from a unit test (private Message constructor), but the
+    /// raw catch-all is the safety net for `non_exhaustive` future
+    /// additions and for any flow where grammers hands us the raw
+    /// shape directly.
+    #[test]
+    fn update_to_event_drops_any_unknown_raw() {
+        let raw = Update::Raw(tl::enums::Update::AttachMenuBots);
         assert!(update_to_event(raw).is_none());
     }
 
