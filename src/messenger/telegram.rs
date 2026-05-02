@@ -1,4 +1,4 @@
-//! Telegram backend, backed by [`grammers-client`].
+//! Telegram backend, backed by the `grammers-client` crate.
 //!
 //! A single [`TelegramBackend`] owns one connected `grammers` `Client`
 //! (and therefore one persisted session at `session_path`). Multiple
@@ -10,16 +10,16 @@
 //!
 //! 1. [`TelegramBackend::open`] connects (creating or loading the
 //!    session). At this point the client may already be authorised
-//!    from a previous run — check with [`Self::is_authorized`].
-//! 2. If not authorised, [`Self::request_login`] sends a login code
+//!    from a previous run — check with [`TelegramBackend::is_authorized`].
+//! 2. If not authorised, [`TelegramBackend::request_login`] sends a login code
 //!    to the user's phone. The grammers `LoginToken` is stashed
 //!    internally so callers don't have to thread it back.
-//! 3. [`Self::submit_code`] hands the SMS code to grammers; the
+//! 3. [`TelegramBackend::submit_code`] hands the SMS code to grammers; the
 //!    returned [`NeedsPassword`] tells the UI whether to additionally
 //!    prompt for the user's 2FA password.
-//! 4. [`Self::submit_password`] (only if needed) finishes the
+//! 4. [`TelegramBackend::submit_password`] (only if needed) finishes the
 //!    handshake.
-//! 5. [`Self::save_session`] persists the session blob to disk.
+//! 5. [`TelegramBackend::save_session`] persists the session blob to disk.
 //!
 //! [`MessengerHub`]: crate::messenger::MessengerHub
 
@@ -160,16 +160,16 @@ impl TelegramBackend {
                 Ok(NeedsPassword(true))
             }
             Err(SignInError::InvalidCode) => Err(Error::Telegram("invalid code".into())),
-            Err(SignInError::SignUpRequired { .. }) => {
-                Err(Error::Telegram("sign-up required (use official client)".into()))
-            }
+            Err(SignInError::SignUpRequired { .. }) => Err(Error::Telegram(
+                "sign-up required (use official client)".into(),
+            )),
             Err(SignInError::InvalidPassword) => Err(Error::Telegram("invalid password".into())),
             Err(SignInError::Other(e)) => Err(Error::Telegram(format!("sign_in: {e}"))),
         }
     }
 
     /// Step 3 of login (only when [`Self::submit_code`] returned
-    /// [`NeedsPassword(true)`]).
+    /// `NeedsPassword(true)`).
     pub async fn submit_password(&self, password: &str) -> Result<()> {
         let pwd_token = {
             let st = self.login.lock().await;
@@ -272,12 +272,7 @@ impl MessengerBackend for TelegramBackend {
         Ok(out)
     }
 
-    async fn send_message(
-        &self,
-        id: &ChatId,
-        body: &str,
-        attachments: &[PathBuf],
-    ) -> Result<i64> {
+    async fn send_message(&self, id: &ChatId, body: &str, attachments: &[PathBuf]) -> Result<i64> {
         if id.backend != Backend::Telegram {
             return Err(Error::Telegram(format!(
                 "TelegramBackend cannot send to {} chat",
@@ -430,10 +425,7 @@ impl TelegramBackend {
 /// `ChatId` of the conversation we fetched from; we copy it instead
 /// of recomputing the chat hex per message because `iter_messages`
 /// already addresses one chat at a time.
-fn message_to_normalized(
-    msg: &grammers_client::types::Message,
-    id: &ChatId,
-) -> NormalizedMessage {
+fn message_to_normalized(msg: &grammers_client::types::Message, id: &ChatId) -> NormalizedMessage {
     let sender = msg
         .sender()
         .map(|c| c.name().to_string())
@@ -604,7 +596,10 @@ mod tests {
 
     #[test]
     fn datetime_to_ms_round_seconds() {
-        let dt = chrono::Utc.timestamp_opt(1_700_000_000, 0).single().unwrap();
+        let dt = chrono::Utc
+            .timestamp_opt(1_700_000_000, 0)
+            .single()
+            .unwrap();
         assert_eq!(conv::datetime_to_ms(dt), 1_700_000_000_000);
     }
 
@@ -663,5 +658,78 @@ mod tests {
             "expected kryptos in path, got {}",
             p.display()
         );
+    }
+
+    #[test]
+    fn text_to_body_passes_unicode_flags_through_unchanged() {
+        // Multi-codepoint flag emoji (regional indicator pairs). We
+        // never decompose / re-encode the body so it must round-trip
+        // byte-for-byte.
+        let flag = "🇺🇸🇯🇵";
+        assert_eq!(conv::text_to_body(flag), Some(flag.to_string()));
+    }
+
+    #[test]
+    fn text_to_body_passes_combining_chars_through_unchanged() {
+        // Composed vs decomposed (NFC vs NFD) matters for cache keys;
+        // we deliberately don't normalize here so the backend's bytes
+        // survive the round trip.
+        let composed = "café"; // single codepoint é
+        let decomposed = "cafe\u{0301}"; // e + combining acute
+        assert_eq!(conv::text_to_body(composed), Some(composed.to_string()));
+        assert_eq!(conv::text_to_body(decomposed), Some(decomposed.to_string()));
+        // And confirm we treat them as distinct strings (no implicit
+        // normalization slipped in).
+        assert_ne!(composed, decomposed);
+    }
+
+    #[test]
+    fn datetime_to_ms_handles_pre_epoch_dates() {
+        // grammers stores timestamps as i64 seconds; nothing prevents
+        // a server-side message from being before the epoch (a clock
+        // skew or doctored date). We must not panic.
+        let dt = chrono::Utc.timestamp_opt(-1, 0).single().unwrap();
+        assert_eq!(conv::datetime_to_ms(dt), -1_000);
+    }
+
+    #[test]
+    fn datetime_to_ms_high_subsec_precision_preserved() {
+        // 999ms — boundary case where subsec_millis rolls into the
+        // next second. Make sure we don't double-count.
+        let dt = chrono::Utc
+            .timestamp_opt(1_700_000_000, 999_000_000)
+            .single()
+            .unwrap();
+        assert_eq!(conv::datetime_to_ms(dt), 1_700_000_000_999);
+    }
+
+    #[test]
+    fn packed_chat_native_string_is_url_safe() {
+        // The hex form ends up as the native part of a `signal:...` /
+        // `telegram:...` wire string in caches and logs; assert it
+        // contains no whitespace / control chars / backslashes that
+        // would need escaping.
+        let chat = test_helpers::fake_user_chat(123, 456);
+        let native = conv::packed_to_native(chat);
+        assert!(!native.is_empty());
+        assert!(native.chars().all(|c| !c.is_whitespace()));
+        assert!(!native.contains('\\'));
+        assert!(!native.contains(':'), "colons would clash with ChatId wire");
+    }
+
+    #[test]
+    fn native_to_packed_rejects_empty_string() {
+        assert!(conv::native_to_packed("").is_err());
+    }
+
+    #[test]
+    fn update_to_event_drops_callback_inline_passthroughs() {
+        // We can't easily construct CallbackQuery / InlineQuery /
+        // InlineSend without a live grammers session because their
+        // constructors are private. The fall-through arm is what
+        // protects us from `non_exhaustive` additions, so prove the
+        // `Update::Raw` path returns None as a stand-in.
+        let raw = test_helpers::fake_raw_update();
+        assert!(update_to_event(raw).is_none());
     }
 }

@@ -351,6 +351,56 @@ mod tests {
         );
     }
 
+    /// `validate_recipient` decides between phone vs UUID by the
+    /// leading `+`. Any input that starts with `+` must be routed
+    /// through the phone validator, not silently accepted as hex even
+    /// if the rest happens to be 32 hex chars.
+    #[test]
+    fn recipient_routes_plus_prefix_to_phone_validator() {
+        // `+` then 32 hex chars: starts with `+`, so we apply the
+        // E.164 rules — and this fails because hex letters aren't
+        // ASCII digits.
+        assert!(
+            validate_recipient("+550e8400e29b41d4a716446655440000").is_err(),
+            "leading + forces phone validation, hex is not digits"
+        );
+        // Plus, plus 11 digits: valid phone, must succeed.
+        assert!(validate_recipient("+14155552671").is_ok());
+    }
+
+    /// Bare hex without `+` is treated as a UUID. The validator strips
+    /// dashes so any 32-hex-char content (with or without canonical
+    /// dashes, mixed case, leading/trailing whitespace) round-trips as
+    /// valid; anything off by one digit, with non-hex bytes, or with a
+    /// stray `+` mid-string fails.
+    #[test]
+    fn recipient_uuid_disambiguation_edge_cases() {
+        // Exactly 32 hex chars, no dashes — accepted.
+        assert!(validate_recipient("00000000000000000000000000000000").is_ok());
+        // Canonical 8-4-4-4-12 — accepted.
+        assert!(validate_recipient("00000000-0000-0000-0000-000000000000").is_ok());
+        // Whitespace trimmed.
+        assert!(validate_recipient("\t 00000000000000000000000000000000\n").is_ok());
+        // Way more than 32 hex chars — rejected (length check after
+        // dash strip).
+        assert!(
+            validate_recipient(&"a".repeat(33)).is_err(),
+            "33 hex chars: too long"
+        );
+        // Way fewer than 32 — rejected.
+        assert!(
+            validate_recipient(&"a".repeat(31)).is_err(),
+            "31 hex chars: too short"
+        );
+        // 32 chars but with one non-hex (`g` for example) — rejected.
+        assert!(validate_recipient("g0000000000000000000000000000000").is_err());
+        // A `+` mid-string can't be stripped (we only strip `-`), so
+        // it lands as a non-hex char and fails. Important: we don't
+        // want a Trojan horse where injecting `+` somewhere in a
+        // garbage string lets it slip through.
+        assert!(validate_recipient("0000000000000000+000000000000000").is_err());
+    }
+
     #[test]
     fn group_id_rejects_empty() {
         assert!(validate_group_id(&[]).is_err());
