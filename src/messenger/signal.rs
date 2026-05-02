@@ -123,12 +123,7 @@ impl MessengerBackend for SignalBackend {
         Ok(Vec::new())
     }
 
-    async fn send_message(
-        &self,
-        id: &ChatId,
-        body: &str,
-        attachments: &[PathBuf],
-    ) -> Result<i64> {
+    async fn send_message(&self, id: &ChatId, body: &str, attachments: &[PathBuf]) -> Result<i64> {
         if id.backend != Backend::Signal {
             return Err(Error::Config(format!(
                 "SignalBackend cannot send to {} chat",
@@ -136,9 +131,7 @@ impl MessengerBackend for SignalBackend {
             )));
         }
         if attachments.is_empty() {
-            self.client
-                .send_text(&self.account, &id.native, body)
-                .await
+            self.client.send_text(&self.account, &id.native, body).await
         } else {
             self.client
                 .send_with_attachments(&self.account, &id.native, body, attachments)
@@ -279,13 +272,61 @@ mod tests {
         );
         assert!(msg.body.is_none());
         assert_eq!(msg.attachments.len(), 1);
-        assert_eq!(
-            msg.attachments[0].file_name.as_deref(),
-            Some("img.jpg")
-        );
+        assert_eq!(msg.attachments[0].file_name.as_deref(), Some("img.jpg"));
         assert_eq!(
             msg.attachments[0].local_path,
             Some(PathBuf::from("/tmp/img.jpg"))
         );
+    }
+
+    #[test]
+    fn very_long_body_passes_through_intact() {
+        // No length cap on bodies — Signal accepts ~64KiB messages and the
+        // cache layer enforces its own limits. Make sure normalization
+        // doesn't truncate or panic on a multi-kilobyte payload.
+        let body: String = "ok ".repeat(10_000);
+        let msg =
+            normalize_message_received(1, "+14155552671".into(), None, body.clone(), Vec::new());
+        assert_eq!(msg.body.as_deref(), Some(body.as_str()));
+    }
+
+    #[test]
+    fn unicode_body_is_preserved_codepoint_perfect() {
+        // RTL, emoji, ZWJ family — anything Signal sends, we pass through.
+        let body = "Привет 👨‍👩‍👧‍👦 العربية 𝕜𝕣𝕪𝕡𝕥𝕠𝕤".to_string();
+        let msg =
+            normalize_message_received(1, "+14155552671".into(), None, body.clone(), Vec::new());
+        assert_eq!(msg.body.as_deref(), Some(body.as_str()));
+    }
+
+    #[test]
+    fn duplicate_attachment_paths_are_kept_distinct_entries() {
+        // Signal is allowed to attach the same file twice; we don't
+        // dedupe — each is a distinct attachment row in the cache.
+        let msg = normalize_message_received(
+            1,
+            "+14155552671".into(),
+            None,
+            "look".into(),
+            vec!["/tmp/dup.jpg".into(), "/tmp/dup.jpg".into()],
+        );
+        assert_eq!(msg.attachments.len(), 2);
+        assert_eq!(msg.attachments[0].local_path, msg.attachments[1].local_path);
+        assert_eq!(msg.attachments[0].file_name, msg.attachments[1].file_name);
+    }
+
+    #[test]
+    fn attachment_without_filename_segment_yields_none_filename() {
+        // A pathological "/" path has no file_name component; the
+        // helper should leave file_name=None rather than panic.
+        let msg = normalize_message_received(
+            1,
+            "+14155552671".into(),
+            None,
+            String::new(),
+            vec!["/".into()],
+        );
+        assert_eq!(msg.attachments.len(), 1);
+        assert!(msg.attachments[0].file_name.is_none());
     }
 }
