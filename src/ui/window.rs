@@ -28,7 +28,6 @@ use super::statusline::{CommandBar, ModeLine};
 pub struct WindowParts {
     pub window: adw::ApplicationWindow,
     pub sidebar_list: gtk::ListBox,
-    pub content_title: adw::WindowTitle,
     pub composer: Composer,
     pub mode_line: ModeLine,
     pub command_bar: CommandBar,
@@ -55,7 +54,7 @@ pub fn build(app: &adw::Application, cfg: &Config) -> WindowParts {
     let sidebar_list = build_sidebar_list();
     let sidebar_search = build_sidebar_search();
     let sidebar = build_sidebar(&sidebar_list, &sidebar_search);
-    let (content, content_title, composer, prefs_button, link_button) = build_content();
+    let (content, composer, prefs_button, link_button) = build_content();
 
     let split = adw::OverlaySplitView::builder()
         .sidebar(&sidebar)
@@ -106,7 +105,6 @@ pub fn build(app: &adw::Application, cfg: &Config) -> WindowParts {
     WindowParts {
         window,
         sidebar_list,
-        content_title,
         composer,
         mode_line,
         command_bar,
@@ -241,15 +239,10 @@ fn build_sidebar(list: &gtk::ListBox, search: &gtk::SearchEntry) -> gtk::Widget 
     toolbar.upcast::<gtk::Widget>()
 }
 
-fn build_content() -> (
-    gtk::Widget,
-    adw::WindowTitle,
-    Composer,
-    gtk::Button,
-    gtk::Button,
-) {
-    let title = adw::WindowTitle::new(PLACEHOLDER_CHATS[0].0, "");
-    let header = adw::HeaderBar::builder().title_widget(&title).build();
+fn build_content() -> (gtk::Widget, Composer, gtk::Button, gtk::Button) {
+    let header = adw::HeaderBar::builder()
+        .title_widget(&adw::WindowTitle::new(PLACEHOLDER_CHATS[0].0, ""))
+        .build();
     header.add_css_class("flat");
 
     let prefs_button = gtk::Button::from_icon_name("open-menu-symbolic");
@@ -304,7 +297,6 @@ fn build_content() -> (
     toolbar.set_content(Some(&body));
     (
         toolbar.upcast::<gtk::Widget>(),
-        title,
         composer,
         prefs_button,
         link_button,
