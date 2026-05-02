@@ -318,4 +318,51 @@ mod tests {
         let mut cfg = Config::default();
         assert!(apply_set(&mut cfg, "start_maximized", Some("maybe")).is_err());
     }
+
+    #[test]
+    fn parse_command_handles_tabs_and_mixed_whitespace() {
+        // Tabs split head from args just like spaces.
+        assert_eq!(
+            parse_command("theme\tgruvbox"),
+            Command::Theme(Some("gruvbox".into()))
+        );
+        // Leading whitespace + tab + trailing whitespace is fine.
+        assert_eq!(
+            parse_command("\t  set\t theme = gruvbox  "),
+            Command::Set {
+                key: "theme".into(),
+                value: Some("gruvbox".into()),
+            }
+        );
+    }
+
+    #[test]
+    fn parse_command_is_case_sensitive() {
+        // We don't lower-case command heads, so capitalised aliases land
+        // in Unknown — make sure that's deliberate, not accidental.
+        assert_eq!(parse_command("Q"), Command::Unknown("Q".into()));
+        assert_eq!(parse_command("Theme"), Command::Unknown("Theme".into()));
+    }
+
+    #[test]
+    fn parse_command_set_keeps_first_equals_only() {
+        // `:set` splits on the FIRST `=`, so values can themselves contain `=`.
+        assert_eq!(
+            parse_command("set keymap=foo=bar=baz"),
+            Command::Set {
+                key: "keymap".into(),
+                value: Some("foo=bar=baz".into()),
+            }
+        );
+    }
+
+    #[test]
+    fn parse_command_theme_keeps_inner_whitespace() {
+        // Multi-word theme arg — splitn(2) means we keep the rest verbatim
+        // (after a single trim), not collapse to a single token.
+        assert_eq!(
+            parse_command("theme catppuccin mocha"),
+            Command::Theme(Some("catppuccin mocha".into())),
+        );
+    }
 }

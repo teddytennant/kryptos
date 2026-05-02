@@ -261,6 +261,30 @@ mod tests {
     }
 
     #[test]
+    fn account_from_object_path_round_trips() {
+        // The canonical path produced by `account_object_path` decodes back
+        // to a `+`-prefixed E.164 number.
+        let canonical = account_object_path("+14155552671");
+        assert_eq!(
+            account_from_object_path(&canonical),
+            Some("+14155552671".into())
+        );
+        // Tolerates a `+` after `_` (newer signal-cli might emit either).
+        assert_eq!(
+            account_from_object_path("/org/asamk/Signal/_+14155552671"),
+            Some("+14155552671".into())
+        );
+        // Non-account paths return None instead of producing a bogus number.
+        assert_eq!(account_from_object_path("/"), None);
+        assert_eq!(account_from_object_path(""), None);
+        assert_eq!(account_from_object_path("/org/asamk/Signal/_"), None);
+        assert_eq!(
+            account_from_object_path("/org/asamk/Signal/notanumber"),
+            None
+        );
+    }
+
+    #[test]
     fn phone_number_requires_e164() {
         assert!(validate_phone_number("+14155552671").is_ok());
         assert!(validate_phone_number("14155552671").is_err(), "missing +");
