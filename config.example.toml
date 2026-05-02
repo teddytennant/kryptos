@@ -2,8 +2,11 @@
 # Saving the file triggers a hot-reload; no restart required.
 
 [general]
-# Built-in: "catppuccin-mocha", "catppuccin-latte", "gruvbox", "tokyo-night",
-# "system" (follow GTK light/dark), or any name registered via :theme.
+# Built-in: "catppuccin-mocha", "catppuccin-latte", "catppuccin-frappe",
+# "catppuccin-macchiato", "gruvbox", "gruvbox-light", "tokyo-night",
+# "tokyo-night-storm", "everforest-dark", "everforest-dark-soft",
+# "everforest-light", "everforest-light-soft", "system" (follow GTK
+# light/dark), or any name registered via :theme.
 theme = "catppuccin-mocha"
 # Leader prefix for compound bindings (e.g. <Space>c -> compose_new).
 leader_key = "<Space>"

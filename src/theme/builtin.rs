@@ -11,6 +11,10 @@ pub const GRUVBOX: &str = include_str!("css/gruvbox.css");
 pub const GRUVBOX_LIGHT: &str = include_str!("css/gruvbox-light.css");
 pub const TOKYO_NIGHT: &str = include_str!("css/tokyo-night.css");
 pub const TOKYO_NIGHT_STORM: &str = include_str!("css/tokyo-night-storm.css");
+pub const EVERFOREST_DARK: &str = include_str!("css/everforest-dark.css");
+pub const EVERFOREST_DARK_SOFT: &str = include_str!("css/everforest-dark-soft.css");
+pub const EVERFOREST_LIGHT: &str = include_str!("css/everforest-light.css");
+pub const EVERFOREST_LIGHT_SOFT: &str = include_str!("css/everforest-light-soft.css");
 
 /// Resolved built-in theme: which CSS blob, and which adw color scheme to
 /// nudge libadwaita-aware widgets toward.
@@ -63,6 +67,26 @@ pub const ALL: &[Builtin] = &[
         canonical_name: "tokyo-night-storm",
         css: TOKYO_NIGHT_STORM,
         color_scheme: ColorScheme::ForceDark,
+    },
+    Builtin {
+        canonical_name: "everforest-dark",
+        css: EVERFOREST_DARK,
+        color_scheme: ColorScheme::ForceDark,
+    },
+    Builtin {
+        canonical_name: "everforest-dark-soft",
+        css: EVERFOREST_DARK_SOFT,
+        color_scheme: ColorScheme::ForceDark,
+    },
+    Builtin {
+        canonical_name: "everforest-light",
+        css: EVERFOREST_LIGHT,
+        color_scheme: ColorScheme::ForceLight,
+    },
+    Builtin {
+        canonical_name: "everforest-light-soft",
+        css: EVERFOREST_LIGHT_SOFT,
+        color_scheme: ColorScheme::ForceLight,
     },
 ];
 
