@@ -1,18 +1,18 @@
-/* Catppuccin Latte — https://catppuccin.com */
+/* Rose Pine Dawn — https://rosepinetheme.com */
 
-@define-color kryptos_bg       #eff1f5;
-@define-color kryptos_mantle   #e6e9ef;
-@define-color kryptos_surface  #ccd0da;
-@define-color kryptos_surface2 #bcc0cc;
-@define-color kryptos_overlay  #9ca0b0;
-@define-color kryptos_fg       #4c4f69;
-@define-color kryptos_subtle   #6c6f85;
-@define-color kryptos_accent   #8839ef;
-@define-color kryptos_blue     #1e66f5;
-@define-color kryptos_green    #40a02b;
-@define-color kryptos_yellow   #df8e1d;
-@define-color kryptos_red      #d20f39;
-@define-color kryptos_lavender #7287fd;
+@define-color kryptos_bg       #faf4ed;
+@define-color kryptos_mantle   #fffaf3;
+@define-color kryptos_surface  #f2e9e1;
+@define-color kryptos_surface2 #9893a5;
+@define-color kryptos_overlay  #797593;
+@define-color kryptos_fg       #575279;
+@define-color kryptos_subtle   #797593;
+@define-color kryptos_accent   #907aa9;
+@define-color kryptos_blue     #56949f;
+@define-color kryptos_green    #286983;
+@define-color kryptos_yellow   #ea9d34;
+@define-color kryptos_red      #b4637a;
+@define-color kryptos_lavender #907aa9;
 
 /* ─── Window & top-level surfaces ─────────────────────────────────── */
 

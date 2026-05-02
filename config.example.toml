@@ -5,7 +5,8 @@
 # Built-in: "catppuccin-mocha", "catppuccin-latte", "catppuccin-frappe",
 # "catppuccin-macchiato", "gruvbox", "gruvbox-light", "tokyo-night",
 # "tokyo-night-storm", "everforest-dark", "everforest-dark-soft",
-# "everforest-light", "everforest-light-soft", "system" (follow GTK
+# "everforest-light", "everforest-light-soft", "rose-pine",
+# "rose-pine-moon", "rose-pine-dawn", "nord", "system" (follow GTK
 # light/dark), or any name registered via :theme.
 theme = "catppuccin-mocha"
 # Leader prefix for compound bindings (e.g. <Space>c -> compose_new).

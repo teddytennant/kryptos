@@ -1,18 +1,18 @@
-/* Catppuccin Latte — https://catppuccin.com */
+/* Rose Pine Moon — https://rosepinetheme.com */
 
-@define-color kryptos_bg       #eff1f5;
-@define-color kryptos_mantle   #e6e9ef;
-@define-color kryptos_surface  #ccd0da;
-@define-color kryptos_surface2 #bcc0cc;
-@define-color kryptos_overlay  #9ca0b0;
-@define-color kryptos_fg       #4c4f69;
-@define-color kryptos_subtle   #6c6f85;
-@define-color kryptos_accent   #8839ef;
-@define-color kryptos_blue     #1e66f5;
-@define-color kryptos_green    #40a02b;
-@define-color kryptos_yellow   #df8e1d;
-@define-color kryptos_red      #d20f39;
-@define-color kryptos_lavender #7287fd;
+@define-color kryptos_bg       #232136;
+@define-color kryptos_mantle   #2a273f;
+@define-color kryptos_surface  #393552;
+@define-color kryptos_surface2 #6e6a86;
+@define-color kryptos_overlay  #908caa;
+@define-color kryptos_fg       #e0def4;
+@define-color kryptos_subtle   #908caa;
+@define-color kryptos_accent   #c4a7e7;
+@define-color kryptos_blue     #9ccfd8;
+@define-color kryptos_green    #31748f;
+@define-color kryptos_yellow   #f6c177;
+@define-color kryptos_red      #eb6f92;
+@define-color kryptos_lavender #c4a7e7;
 
 /* ─── Window & top-level surfaces ─────────────────────────────────── */
 
@@ -295,31 +295,6 @@ button.suggested-action.pill:hover {
   color: @kryptos_fg;
   box-shadow: none;
   border: 1px solid alpha(@kryptos_fg, 0.06);
-}
-
-/* ─── Light-palette hairline boost ────────────────────────────────── */
-/* Light themes need a touch more contrast on hairlines so they read
-   as deliberate, not accidental. Bump 0.06 → 0.10 across the board. */
-.sidebar-header,
-overlaysplitview > .sidebar-pane,
-box.sidebar, .sidebar,
-.sidebar-search,
-.kryptos-modeline, .mode-line-row,
-.command-bar,
-preferenceswindow listbox.boxed-list,
-preferenceswindow listbox.boxed-list-separate,
-preferenceswindow listbox.boxed-list > row,
-.kryptos-qr-card,
-.kryptos-linker-name,
-.toast {
-  border-color: alpha(@kryptos_fg, 0.10);
-}
-.kryptos-chat-row:hover,
-listbox.navigation-sidebar > row:hover {
-  background-color: alpha(@kryptos_fg, 0.06);
-}
-.bubble-theirs {
-  background-color: alpha(@kryptos_fg, 0.08);
 }
 
 /* ─── Avatar hue palette — 8 deterministic colours ────────────────── */
