@@ -473,7 +473,11 @@ fn wire_sidebar_selection(
         let hub = ctx.hub.clone();
         let (tx, rx) = std::sync::mpsc::channel::<Vec<NormalizedMessage>>();
         ctx.runtime.spawn(async move {
-            match hub.backends().iter().find(|b| b.backend() == id_clone.backend) {
+            match hub
+                .backends()
+                .iter()
+                .find(|b| b.backend() == id_clone.backend)
+            {
                 Some(backend) => match backend.fetch_history(&id_clone, 100, None).await {
                     Ok(msgs) => {
                         // Persist for next cold start.
@@ -532,7 +536,8 @@ fn wire_composer_send(
     let toast_overlay = parts.toast_overlay.clone();
 
     parts.composer.set_on_send(move |text| {
-        info!(message = %text, "composer Enter");
+        // PII: never log message body. `len` is enough for activity tracing.
+        info!(len = text.len(), "composer Enter");
         engine.borrow_mut().set_mode(Mode::Normal);
         mode_line.set_mode(Mode::Normal);
 
@@ -564,11 +569,9 @@ fn wire_composer_send(
                 crate::messenger::Backend::Signal => {
                     crate::messenger::BackendExtras::Signal { group_id: None }
                 }
-                crate::messenger::Backend::Telegram => {
-                    crate::messenger::BackendExtras::Telegram {
-                        reply_to_msg_id: None,
-                    }
-                }
+                crate::messenger::Backend::Telegram => crate::messenger::BackendExtras::Telegram {
+                    reply_to_msg_id: None,
+                },
             },
         };
         append_message_widget(&messages_box, &optimistic);
@@ -602,20 +605,20 @@ fn wire_composer_send(
                     }
                 }
             });
-            glib::source::timeout_add_local(Duration::from_millis(120), move || match err_rx
-                .try_recv()
-            {
-                Ok(msg) => {
-                    let toast = adw::Toast::builder()
-                        .title(&format!("Send failed: {msg}"))
-                        .timeout(5)
-                        .priority(adw::ToastPriority::High)
-                        .build();
-                    toast_overlay_for_err.add_toast(toast);
-                    glib::ControlFlow::Break
+            glib::source::timeout_add_local(Duration::from_millis(120), move || {
+                match err_rx.try_recv() {
+                    Ok(msg) => {
+                        let toast = adw::Toast::builder()
+                            .title(format!("Send failed: {msg}"))
+                            .timeout(5)
+                            .priority(adw::ToastPriority::High)
+                            .build();
+                        toast_overlay_for_err.add_toast(toast);
+                        glib::ControlFlow::Break
+                    }
+                    Err(std::sync::mpsc::TryRecvError::Empty) => glib::ControlFlow::Continue,
+                    Err(std::sync::mpsc::TryRecvError::Disconnected) => glib::ControlFlow::Break,
                 }
-                Err(std::sync::mpsc::TryRecvError::Empty) => glib::ControlFlow::Continue,
-                Err(std::sync::mpsc::TryRecvError::Disconnected) => glib::ControlFlow::Break,
             });
         }
     });
