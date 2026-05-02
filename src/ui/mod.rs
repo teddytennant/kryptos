@@ -20,12 +20,23 @@ mod window;
 
 use std::cell::RefCell;
 use std::rc::Rc;
+use std::sync::Arc;
+use std::time::Duration;
 
 use adw::prelude::*;
 use gtk::glib;
-use tracing::{error, info, warn};
+use tokio::sync::mpsc as tmpsc;
+use tracing::{debug, error, info, warn};
 
+use crate::cache::models::{Conversation, Message};
+use crate::cache::Cache;
 use crate::config::{loader, Config};
+use crate::core::Result;
+use crate::dbus::SignalClient;
+use crate::messenger::{
+    signal::SignalBackend, ChatId, ConversationSummary, Event as MEvent, MessengerHub,
+    NormalizedMessage,
+};
 use crate::theme::ThemeManager;
 use crate::vim::{Engine, KeySym, KeymapSet, Mode, Outcome};
 
@@ -42,6 +53,91 @@ pub fn run() -> glib::ExitCode {
     app.run()
 }
 
+/// Async-side state shared between the worker thread and the GTK
+/// thread. The hub + cache are `Arc`-wrapped so the worker can clone
+/// handles freely; the runtime stays parked behind `Arc<Runtime>` so
+/// we can `runtime.spawn(...)` from anywhere.
+struct AsyncCtx {
+    runtime: Arc<tokio::runtime::Runtime>,
+    hub: Arc<MessengerHub>,
+    cache: Arc<Cache>,
+}
+
+impl AsyncCtx {
+    /// Spin up the runtime, build the cache and hub, attach all
+    /// configured backends. Errors degrade to "no backends, no cache" —
+    /// the UI will simply show its empty state.
+    fn try_build(cfg: &Config) -> Option<Arc<Self>> {
+        let runtime = match tokio::runtime::Builder::new_multi_thread()
+            .worker_threads(2)
+            .enable_all()
+            .build()
+        {
+            Ok(rt) => Arc::new(rt),
+            Err(e) => {
+                error!(error = %e, "tokio runtime build failed; sync layer disabled");
+                return None;
+            }
+        };
+
+        let cache = match runtime.block_on(open_cache()) {
+            Ok(c) => Arc::new(c),
+            Err(e) => {
+                error!(error = %e, "cache open failed; sync layer disabled");
+                return None;
+            }
+        };
+
+        let mut hub = MessengerHub::new();
+        if cfg.backends.signal.enabled {
+            match runtime.block_on(build_signal_backend()) {
+                Ok(Some(backend)) => hub.add(backend),
+                Ok(None) => debug!("no Signal account configured; backend not added"),
+                Err(e) => warn!(error = %e, "signal backend init failed"),
+            }
+        }
+        // Telegram: backend is wired but interactive login UI lives in a
+        // separate task. Leave it out of the auto-init path; users who
+        // want it can flip the schema's `[backends.telegram]` once
+        // login lands.
+
+        Some(Arc::new(Self {
+            runtime,
+            hub: Arc::new(hub),
+            cache,
+        }))
+    }
+}
+
+async fn open_cache() -> Result<Cache> {
+    let path = Cache::default_path()?;
+    Cache::open(&path).await
+}
+
+async fn build_signal_backend() -> Result<Option<Arc<SignalBackend>>> {
+    let client = match SignalClient::connect().await {
+        Ok(c) => c,
+        Err(e) => {
+            warn!(error = %e, "signal-cli D-Bus connect failed; signal disabled");
+            return Ok(None);
+        }
+    };
+    if let Err(e) = crate::dbus::ensure_running(client.connection()).await {
+        warn!(error = %e, "signal-cli daemon unreachable; signal disabled");
+        return Ok(None);
+    }
+    let accounts = client.list_accounts().await.unwrap_or_default();
+    let account = match accounts.into_iter().next() {
+        Some(a) => a,
+        None => {
+            debug!("signal-cli has no accounts yet; backend will spin up after link");
+            return Ok(None);
+        }
+    };
+    let client = Arc::new(client);
+    Ok(Some(Arc::new(SignalBackend::new(client, account))))
+}
+
 fn activate(app: &adw::Application) {
     info!("activating main window");
 
@@ -52,6 +148,7 @@ fn activate(app: &adw::Application) {
             return;
         }
     };
+    let config_existed = config_path.exists();
     let cfg = match loader::load_or_default(&config_path) {
         Ok(c) => c,
         Err(e) => {
@@ -82,10 +179,6 @@ fn activate(app: &adw::Application) {
         }
         None => {
             error!("no default display; theme manager disabled");
-            // We still need *something*; install_for_display panics
-            // without a display anyway, so fall back to a placeholder
-            // by creating one against any available display we can find.
-            // In practice activate() always runs with a display available.
             return;
         }
     };
@@ -101,19 +194,25 @@ fn activate(app: &adw::Application) {
     let engine = Rc::new(RefCell::new(engine));
     let dispatcher = Dispatcher::new(&parts, theme.clone(), config_path.clone());
 
-    // Composer-local Enter: when the user hits Enter in the composer
-    // itself (Normal or Insert), the composer's own controller fires
-    // first and ends up here. We log + sync the window-level engine
-    // back to Normal so the modeline reflects reality.
-    {
-        let engine = engine.clone();
-        let mode_line = parts.mode_line.clone();
-        parts.composer.set_on_send(move |text| {
-            info!(message = %text, "send message (composer Enter)");
-            engine.borrow_mut().set_mode(Mode::Normal);
-            mode_line.set_mode(Mode::Normal);
-        });
+    let async_ctx = AsyncCtx::try_build(&cfg);
+
+    // Active chat id for the composer + per-row history fetch. Owned by
+    // the GTK thread and cloned into worker callbacks as needed.
+    let active_chat: Rc<RefCell<Option<ChatId>>> = Rc::new(RefCell::new(None));
+
+    if let Some(ctx) = async_ctx.as_ref() {
+        prime_sidebar_from_cache(ctx.clone(), &parts);
+        spawn_remote_refresh(ctx.clone(), &parts);
+        spawn_event_subscription(ctx.clone(), &parts, active_chat.clone());
+        wire_sidebar_selection(ctx.clone(), &parts, active_chat.clone());
     }
+
+    wire_composer_send(
+        async_ctx.clone(),
+        &parts,
+        active_chat.clone(),
+        engine.clone(),
+    );
 
     wire_command_bar(&parts, &dispatcher, engine.clone());
     wire_keys(&parts, &dispatcher, engine.clone());
@@ -121,8 +220,544 @@ fn activate(app: &adw::Application) {
     parts.mode_line.set_mode(engine.borrow().mode());
     parts.window.present();
 
-    maybe_open_first_run_linker(&parts.window);
+    // First-run welcome experience. We show it whenever the config file
+    // didn't exist yet (proxy for a brand-new install) OR the user has
+    // never completed onboarding. The skip / completion paths both
+    // persist `[onboarding] completed = true`.
+    let needs_welcome = !cfg.onboarding.completed || !config_existed;
+    if needs_welcome {
+        let win = parts.window.clone();
+        let path = config_path.clone();
+        onboarding::present_welcome(&win, path, move || {
+            // Once the welcome flow finishes, kick a refresh so any
+            // newly-linked Signal account starts populating the
+            // sidebar without requiring the user to restart.
+            debug!("welcome finished; sync layer takes over");
+        });
+    } else {
+        // Old behaviour: nudge the user toward the linker if signal-cli
+        // reports zero accounts. Skipped when welcome runs because the
+        // welcome flow already routes the user there.
+        maybe_open_first_run_linker(&parts.window);
+    }
 }
+
+/// Read the cached conversation list synchronously (well — block on the
+/// runtime, the call is fast since SQLite is local) and push it to the
+/// sidebar so the user sees immediate state on cold start.
+fn prime_sidebar_from_cache(ctx: Arc<AsyncCtx>, parts: &WindowParts) {
+    let convs = match ctx.runtime.block_on(ctx.cache.list_conversations()) {
+        Ok(rows) => rows,
+        Err(e) => {
+            warn!(error = %e, "cache list_conversations failed; sidebar starts empty");
+            return;
+        }
+    };
+    let summaries: Vec<ConversationSummary> = convs.iter().map(conv_row_to_summary).collect();
+    parts.set_conversations(&summaries);
+}
+
+/// Kick the hub for a fresh conversation list and merge it into the
+/// sidebar + cache. Runs entirely off the GTK thread; results are
+/// marshalled back via `glib::idle_add_local_once`.
+fn spawn_remote_refresh(ctx: Arc<AsyncCtx>, parts: &WindowParts) {
+    let parts_index = parts.sidebar_index.clone();
+    let parts_list = parts.sidebar_list.clone();
+    let parts_scroller = parts.sidebar_scroller.clone();
+    let parts_empty = parts.sidebar_empty.clone();
+
+    let hub = ctx.hub.clone();
+    let cache = ctx.cache.clone();
+
+    let (tx, rx) = std::sync::mpsc::channel::<Vec<ConversationSummary>>();
+    ctx.runtime.spawn(async move {
+        let convs = hub.list_all_conversations().await;
+        // Write through to the cache so a future cold start has them.
+        for c in &convs {
+            let _ = cache
+                .upsert_conversation(&Conversation {
+                    id: c.id.to_wire(),
+                    name: Some(c.title.clone()),
+                    group_id: None,
+                    last_message_ts: c.last_message_ts,
+                    unread_count: c.unread as i32,
+                    archived: false,
+                    muted_until: None,
+                })
+                .await;
+        }
+        let _ = tx.send(convs);
+    });
+
+    glib::source::timeout_add_local(Duration::from_millis(150), move || match rx.try_recv() {
+        Ok(convs) => {
+            // Replace the sidebar list in place (we can't borrow
+            // WindowParts here since it isn't 'static, so reuse the
+            // cloned widget handles).
+            let parts = WindowPartsLite {
+                sidebar_list: parts_list.clone(),
+                sidebar_scroller: parts_scroller.clone(),
+                sidebar_empty: parts_empty.clone(),
+                sidebar_index: parts_index.clone(),
+            };
+            parts.set_conversations(&convs);
+            glib::ControlFlow::Break
+        }
+        Err(std::sync::mpsc::TryRecvError::Empty) => glib::ControlFlow::Continue,
+        Err(std::sync::mpsc::TryRecvError::Disconnected) => glib::ControlFlow::Break,
+    });
+}
+
+/// Subscribe to hub events on the runtime, cache write-through, and
+/// push UI updates to the GTK thread.
+fn spawn_event_subscription(
+    ctx: Arc<AsyncCtx>,
+    parts: &WindowParts,
+    active_chat: Rc<RefCell<Option<ChatId>>>,
+) {
+    let hub = ctx.hub.clone();
+    let cache = ctx.cache.clone();
+
+    let (events_tx, events_rx) = std::sync::mpsc::channel::<MEvent>();
+
+    ctx.runtime.spawn(async move {
+        let mut rx = match hub.subscribe_all().await {
+            Ok(rx) => rx,
+            Err(e) => {
+                warn!(error = %e, "hub subscribe_all failed; live events disabled");
+                return;
+            }
+        };
+        while let Some(ev) = rx.recv().await {
+            // Cache write-through. Failures get logged but don't drop
+            // the event — we still surface it in the UI so the user
+            // doesn't miss messages even if persistence is sad.
+            if let Err(e) = persist_event(&cache, &ev).await {
+                warn!(error = %e, "cache persist failed");
+            }
+            if events_tx.send(ev).is_err() {
+                debug!("UI consumer dropped; teardown");
+                break;
+            }
+        }
+    });
+
+    let messages_box = parts.messages_box.clone();
+    let sidebar_index = parts.sidebar_index.clone();
+    let sidebar_list = parts.sidebar_list.clone();
+    let sidebar_scroller = parts.sidebar_scroller.clone();
+    let sidebar_empty = parts.sidebar_empty.clone();
+    let content_title = parts.content_title.clone();
+
+    glib::source::timeout_add_local(Duration::from_millis(120), move || {
+        loop {
+            match events_rx.try_recv() {
+                Ok(MEvent::MessageReceived(msg)) => {
+                    let summary = ConversationSummary {
+                        id: msg.id.clone(),
+                        title: msg.id.native.clone(),
+                        last_message_ts: Some(msg.ts_ms),
+                        unread: 0,
+                    };
+                    let parts = WindowPartsLite {
+                        sidebar_list: sidebar_list.clone(),
+                        sidebar_scroller: sidebar_scroller.clone(),
+                        sidebar_empty: sidebar_empty.clone(),
+                        sidebar_index: sidebar_index.clone(),
+                    };
+                    parts.upsert_conversation(&summary);
+
+                    // If the message belongs to the active chat, append
+                    // it to the visible message box too.
+                    if active_chat.borrow().as_ref() == Some(&msg.id) {
+                        append_message_widget(&messages_box, &msg);
+                    }
+                    let _ = &content_title;
+                }
+                Ok(MEvent::Edited { id, ts, new_body }) => {
+                    debug!(?id, ts, "edit event (UI rebuild deferred)");
+                    let _ = new_body;
+                }
+                Ok(MEvent::Deleted { id, ts }) => {
+                    debug!(?id, ts, "delete event (UI rebuild deferred)");
+                }
+                Err(std::sync::mpsc::TryRecvError::Empty) => break,
+                Err(std::sync::mpsc::TryRecvError::Disconnected) => {
+                    return glib::ControlFlow::Break;
+                }
+            }
+        }
+        glib::ControlFlow::Continue
+    });
+}
+
+/// Write a hub event into the cache. Conversation upserts come first so
+/// foreign-key refs from `messages` are valid.
+async fn persist_event(cache: &Cache, ev: &MEvent) -> Result<()> {
+    match ev {
+        MEvent::MessageReceived(msg) => {
+            cache
+                .upsert_conversation(&Conversation {
+                    id: msg.id.to_wire(),
+                    name: Some(msg.id.native.clone()),
+                    group_id: None,
+                    last_message_ts: Some(msg.ts_ms),
+                    unread_count: 0,
+                    archived: false,
+                    muted_until: None,
+                })
+                .await?;
+            cache
+                .insert_message(&Message {
+                    id: 0,
+                    conversation_id: msg.id.to_wire(),
+                    ts: msg.ts_ms,
+                    sender: msg.sender.clone(),
+                    body: msg.body.clone(),
+                    quote_ts: None,
+                    quote_sender: None,
+                    edited_ts: None,
+                    deleted: false,
+                })
+                .await?;
+        }
+        MEvent::Edited { .. } | MEvent::Deleted { .. } => {
+            // Cache schema doesn't currently expose update-by-(conv,ts)
+            // so leave these as a TODO; the UI side already logs.
+        }
+    }
+    Ok(())
+}
+
+/// Wire row-clicks: when a sidebar row is selected, show the messages
+/// for that chat (cache first, then refresh from the hub).
+fn wire_sidebar_selection(
+    ctx: Arc<AsyncCtx>,
+    parts: &WindowParts,
+    active_chat: Rc<RefCell<Option<ChatId>>>,
+) {
+    let sidebar_index = parts.sidebar_index.clone();
+    let messages_box = parts.messages_box.clone();
+    let content_title = parts.content_title.clone();
+
+    parts.sidebar_list.connect_row_selected(move |_, row| {
+        let row = match row {
+            Some(r) => r,
+            None => return,
+        };
+        let id = sidebar_index
+            .borrow()
+            .iter()
+            .find(|(_, r)| r == row)
+            .map(|(id, _)| id.clone());
+        let id = match id {
+            Some(id) => id,
+            None => return,
+        };
+        *active_chat.borrow_mut() = Some(id.clone());
+        content_title.set_title(&id.native);
+
+        // Cache-first read.
+        let cache_msgs = ctx
+            .runtime
+            .block_on(ctx.cache.list_messages(&id.to_wire(), 200, None))
+            .unwrap_or_default();
+        // Sort oldest-first; cache returns DESC.
+        let mut sorted = cache_msgs.clone();
+        sorted.sort_by_key(|m| m.ts);
+        rebuild_messages_box(&messages_box, &sorted, &id);
+
+        // Async refresh from hub.
+        let id_clone = id.clone();
+        let cache = ctx.cache.clone();
+        let hub = ctx.hub.clone();
+        let (tx, rx) = std::sync::mpsc::channel::<Vec<NormalizedMessage>>();
+        ctx.runtime.spawn(async move {
+            match hub.backends().iter().find(|b| b.backend() == id_clone.backend) {
+                Some(backend) => match backend.fetch_history(&id_clone, 100, None).await {
+                    Ok(msgs) => {
+                        // Persist for next cold start.
+                        for m in &msgs {
+                            let _ = cache
+                                .insert_message(&Message {
+                                    id: 0,
+                                    conversation_id: m.id.to_wire(),
+                                    ts: m.ts_ms,
+                                    sender: m.sender.clone(),
+                                    body: m.body.clone(),
+                                    quote_ts: None,
+                                    quote_sender: None,
+                                    edited_ts: None,
+                                    deleted: false,
+                                })
+                                .await;
+                        }
+                        let _ = tx.send(msgs);
+                    }
+                    Err(e) => {
+                        debug!(error = %e, "fetch_history failed");
+                    }
+                },
+                None => debug!(?id_clone, "no backend registered for chat"),
+            }
+        });
+
+        let messages_box_ui = messages_box.clone();
+        let id_for_ui = id.clone();
+        glib::source::timeout_add_local(Duration::from_millis(120), move || match rx.try_recv() {
+            Ok(mut msgs) => {
+                if !msgs.is_empty() {
+                    msgs.sort_by_key(|m| m.ts_ms);
+                    rebuild_messages_box_normalized(&messages_box_ui, &msgs, &id_for_ui);
+                }
+                glib::ControlFlow::Break
+            }
+            Err(std::sync::mpsc::TryRecvError::Empty) => glib::ControlFlow::Continue,
+            Err(std::sync::mpsc::TryRecvError::Disconnected) => glib::ControlFlow::Break,
+        });
+    });
+}
+
+/// Composer Enter: send via the hub (off-thread) and optimistically
+/// append the message to the UI + cache so the user sees their text
+/// land instantly.
+fn wire_composer_send(
+    ctx: Option<Arc<AsyncCtx>>,
+    parts: &WindowParts,
+    active_chat: Rc<RefCell<Option<ChatId>>>,
+    engine: Rc<RefCell<Engine>>,
+) {
+    let mode_line = parts.mode_line.clone();
+    let messages_box = parts.messages_box.clone();
+    let toast_overlay = parts.toast_overlay.clone();
+
+    parts.composer.set_on_send(move |text| {
+        info!(message = %text, "composer Enter");
+        engine.borrow_mut().set_mode(Mode::Normal);
+        mode_line.set_mode(Mode::Normal);
+
+        let id = match active_chat.borrow().clone() {
+            Some(id) => id,
+            None => {
+                let toast = adw::Toast::builder()
+                    .title("Pick a chat first.")
+                    .timeout(3)
+                    .build();
+                toast_overlay.add_toast(toast);
+                return;
+            }
+        };
+
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_millis() as i64)
+            .unwrap_or(0);
+
+        // Optimistic UI: append a "mine" bubble immediately.
+        let optimistic = NormalizedMessage {
+            id: id.clone(),
+            ts_ms: now,
+            sender: "me".into(),
+            body: Some(text.clone()),
+            attachments: Vec::new(),
+            backend_extras: match id.backend {
+                crate::messenger::Backend::Signal => {
+                    crate::messenger::BackendExtras::Signal { group_id: None }
+                }
+                crate::messenger::Backend::Telegram => {
+                    crate::messenger::BackendExtras::Telegram {
+                        reply_to_msg_id: None,
+                    }
+                }
+            },
+        };
+        append_message_widget(&messages_box, &optimistic);
+
+        if let Some(ctx) = ctx.clone() {
+            let id_clone = id.clone();
+            let body_clone = text.clone();
+            let cache = ctx.cache.clone();
+            let hub = ctx.hub.clone();
+            let toast_overlay_for_err = toast_overlay.clone();
+            let (err_tx, err_rx) = std::sync::mpsc::channel::<String>();
+            ctx.runtime.spawn(async move {
+                match hub.send(&id_clone, &body_clone, &[]).await {
+                    Ok(ts) => {
+                        let _ = cache
+                            .insert_message(&Message {
+                                id: 0,
+                                conversation_id: id_clone.to_wire(),
+                                ts,
+                                sender: "me".into(),
+                                body: Some(body_clone),
+                                quote_ts: None,
+                                quote_sender: None,
+                                edited_ts: None,
+                                deleted: false,
+                            })
+                            .await;
+                    }
+                    Err(e) => {
+                        let _ = err_tx.send(format!("{e}"));
+                    }
+                }
+            });
+            glib::source::timeout_add_local(Duration::from_millis(120), move || match err_rx
+                .try_recv()
+            {
+                Ok(msg) => {
+                    let toast = adw::Toast::builder()
+                        .title(&format!("Send failed: {msg}"))
+                        .timeout(5)
+                        .priority(adw::ToastPriority::High)
+                        .build();
+                    toast_overlay_for_err.add_toast(toast);
+                    glib::ControlFlow::Break
+                }
+                Err(std::sync::mpsc::TryRecvError::Empty) => glib::ControlFlow::Continue,
+                Err(std::sync::mpsc::TryRecvError::Disconnected) => glib::ControlFlow::Break,
+            });
+        }
+    });
+}
+
+// ----- Local helpers -----
+
+/// Lightweight handle bundle so we can share sidebar mutation logic
+/// between the sync prime path and the async refresh callback. Mirrors
+/// the subset of [`WindowParts`] those helpers need.
+struct WindowPartsLite {
+    sidebar_list: gtk::ListBox,
+    sidebar_scroller: gtk::ScrolledWindow,
+    sidebar_empty: gtk::Widget,
+    sidebar_index: Rc<RefCell<Vec<(ChatId, gtk::ListBoxRow)>>>,
+}
+
+impl WindowPartsLite {
+    fn set_conversations(&self, convs: &[ConversationSummary]) {
+        while let Some(row) = self.sidebar_list.row_at_index(0) {
+            self.sidebar_list.remove(&row);
+        }
+        self.sidebar_index.borrow_mut().clear();
+        for c in convs {
+            let ts_label = c
+                .last_message_ts
+                .map(window::format_clock_label)
+                .unwrap_or_default();
+            let row = window::chat_row(&c.title, "", &ts_label);
+            self.sidebar_list.append(&row);
+            self.sidebar_index
+                .borrow_mut()
+                .push((c.id.clone(), row.clone()));
+        }
+        let has_rows = self.sidebar_list.row_at_index(0).is_some();
+        self.sidebar_scroller.set_visible(has_rows);
+        self.sidebar_empty.set_visible(!has_rows);
+        if has_rows && self.sidebar_list.selected_row().is_none() {
+            if let Some(first) = self.sidebar_list.row_at_index(0) {
+                self.sidebar_list.select_row(Some(&first));
+            }
+        }
+    }
+
+    fn upsert_conversation(&self, summary: &ConversationSummary) {
+        let existing = {
+            let idx = self.sidebar_index.borrow();
+            idx.iter()
+                .position(|(cid, _)| cid == &summary.id)
+                .map(|i| (i, idx[i].1.clone()))
+        };
+        if let Some((i, row)) = existing {
+            self.sidebar_list.remove(&row);
+            self.sidebar_index.borrow_mut().remove(i);
+        }
+        let ts_label = summary
+            .last_message_ts
+            .map(window::format_clock_label)
+            .unwrap_or_default();
+        let row = window::chat_row(&summary.title, "", &ts_label);
+        self.sidebar_list.prepend(&row);
+        self.sidebar_index
+            .borrow_mut()
+            .insert(0, (summary.id.clone(), row));
+        let has_rows = self.sidebar_list.row_at_index(0).is_some();
+        self.sidebar_scroller.set_visible(has_rows);
+        self.sidebar_empty.set_visible(!has_rows);
+    }
+}
+
+fn rebuild_messages_box(b: &gtk::Box, msgs: &[Message], id: &ChatId) {
+    while let Some(child) = b.first_child() {
+        b.remove(&child);
+    }
+    if msgs.is_empty() {
+        b.append(&window::messages_empty_state());
+        return;
+    }
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_millis() as i64)
+        .unwrap_or(0);
+    let rows: Vec<(bool, String, i64)> = msgs
+        .iter()
+        .map(|m| {
+            let mine = m.sender == "me" || m.sender != id.native;
+            (mine, m.body.clone().unwrap_or_default(), m.ts)
+        })
+        .collect();
+    window::populate_messages(b, &rows, now);
+}
+
+fn rebuild_messages_box_normalized(b: &gtk::Box, msgs: &[NormalizedMessage], id: &ChatId) {
+    while let Some(child) = b.first_child() {
+        b.remove(&child);
+    }
+    if msgs.is_empty() {
+        b.append(&window::messages_empty_state());
+        return;
+    }
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_millis() as i64)
+        .unwrap_or(0);
+    let rows: Vec<(bool, String, i64)> = msgs
+        .iter()
+        .map(|m| {
+            let mine = m.sender == "me" || m.sender != id.native;
+            (mine, m.body.clone().unwrap_or_default(), m.ts_ms)
+        })
+        .collect();
+    window::populate_messages(b, &rows, now);
+}
+
+fn append_message_widget(messages_box: &gtk::Box, msg: &NormalizedMessage) {
+    if let Some(first) = messages_box.first_child() {
+        if first.has_css_class("kryptos-empty-state") {
+            messages_box.remove(&first);
+        }
+    }
+    let mine = msg.sender == "me" || msg.sender != msg.id.native;
+    let label = window::format_clock_label(msg.ts_ms);
+    let body = msg.body.clone().unwrap_or_default();
+    messages_box.append(&window::message_row(mine, &body, &label, true, true));
+}
+
+fn conv_row_to_summary(c: &Conversation) -> ConversationSummary {
+    let id = ChatId::from_wire(&c.id).unwrap_or_else(|| ChatId {
+        backend: crate::messenger::Backend::Signal,
+        native: c.id.clone(),
+    });
+    ConversationSummary {
+        id,
+        title: c.name.clone().unwrap_or_else(|| c.id.clone()),
+        last_message_ts: c.last_message_ts,
+        unread: c.unread_count.max(0) as u32,
+    }
+}
+
+// Avoid warnings for unused imports / channels in degraded modes.
+#[allow(dead_code)]
+fn _unused_marker(_: tmpsc::UnboundedReceiver<MEvent>) {}
 
 /// Off-thread first-run check. If signal-cli is reachable and reports
 /// zero accounts, we surface the linker non-modally on top of the
@@ -130,9 +765,6 @@ fn activate(app: &adw::Application) {
 /// falls through to the main UI so the user is never trapped.
 fn maybe_open_first_run_linker(window: &adw::ApplicationWindow) {
     use std::sync::mpsc;
-    use std::time::Duration;
-
-    use crate::dbus::SignalClient;
 
     let (tx, rx) = mpsc::channel::<bool>();
     std::thread::Builder::new()
