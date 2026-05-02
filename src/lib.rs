@@ -6,6 +6,7 @@
 //! - [`config`]        — parse and watch `~/.config/kryptos/config.toml`.
 //! - [`core`]          — shared error type, logging.
 //! - [`dbus`]          — type-safe zbus proxy for signal-cli.
+//! - [`messenger`]     — protocol-agnostic backend trait + Signal/Telegram impls.
 //! - [`notifications`] — desktop notifications + in-app badge state.
 //! - [`theme`]         — built-in palettes + drop-in custom CSS, hot-reloaded.
 //! - [`ui`]            — gtk4 + libadwaita view layer.
@@ -15,6 +16,7 @@ pub mod cache;
 pub mod config;
 pub mod core;
 pub mod dbus;
+pub mod messenger;
 pub mod notifications;
 pub mod theme;
 pub mod ui;

@@ -1272,6 +1272,7 @@ name = "kryptos"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "async-trait",
  "directories",
  "futures-util",
  "gtk4",
