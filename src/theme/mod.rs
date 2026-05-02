@@ -271,6 +271,45 @@ mod tests {
         );
     }
 
+    /// Mixed-case + leading/trailing whitespace + tab characters. The
+    /// `:set theme = ...` path goes through user input where editors
+    /// happily inject either, and case-only differences shouldn't
+    /// surprise the user with "unknown theme".
+    #[test]
+    fn lookup_normalises_messy_input() {
+        for input in [
+            "Tokyo-Night",
+            "TOKYO-NIGHT",
+            "  tokyo-night  ",
+            "\ttokyo-night\t",
+            " \t Tokyo-Night \t ",
+        ] {
+            assert_eq!(
+                builtin::lookup(input).map(|b| b.canonical_name),
+                Some("tokyo-night"),
+                "case/whitespace failed for {input:?}"
+            );
+        }
+    }
+
+    /// Internal whitespace is NOT normalised — `tokyo night` (space
+    /// instead of dash) is a different theme name. Documents that
+    /// normalisation is trim+lowercase only, no tokenisation.
+    #[test]
+    fn lookup_does_not_normalise_internal_whitespace() {
+        assert!(builtin::lookup("tokyo night").is_none());
+        assert!(builtin::lookup("catppuccin mocha").is_none());
+    }
+
+    /// Empty string and whitespace-only inputs return None instead of
+    /// matching some theme by accident.
+    #[test]
+    fn lookup_empty_or_whitespace_only_is_none() {
+        assert!(builtin::lookup("").is_none());
+        assert!(builtin::lookup("   ").is_none());
+        assert!(builtin::lookup("\t\t").is_none());
+    }
+
     #[test]
     fn lookup_unknown_returns_none() {
         assert!(builtin::lookup("solarized").is_none());
