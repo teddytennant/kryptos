@@ -141,6 +141,7 @@ impl Dispatcher {
             Command::Reload => self.reload_config(),
             Command::Settings => Settings::open(&self.window),
             Command::Link(_) => onboarding::open_linker(&self.window),
+            Command::TelegramLogin => onboarding::present_telegram_login(&self.window, None),
             Command::Help => self.toast_info(help_text()),
             Command::Unknown(head) => self.toast_error(&format!("unknown command: :{head}")),
         }

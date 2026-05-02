@@ -34,9 +34,11 @@ use crate::core::{Error, Result};
 use crate::dbus::SignalClient;
 
 mod link_state;
+pub mod telegram_login;
 mod welcome;
 
 pub use link_state::{detect_new_account, LinkOutcome};
+pub use telegram_login::present as present_telegram_login;
 pub use welcome::present as present_welcome;
 
 /// How often we ask signal-cli "did the link finish yet?".
