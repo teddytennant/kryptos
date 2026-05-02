@@ -18,6 +18,11 @@ relm4 = { version = "0.9", features = ["libadwaita"] }
 # D-Bus to signal-cli
 zbus = { version = "5", default-features = false, features = ["tokio"] }
 
+# Telegram (MTProto) backend
+grammers-client = "0.7"
+grammers-session = "0.7"
+grammers-tl-types = "0.7"
+
 # Async runtime
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "sync", "time", "fs", "process", "signal"] }
 futures-util = "0.3"
