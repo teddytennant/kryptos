@@ -31,6 +31,7 @@ pub struct WindowParts {
     pub composer: Composer,
     pub mode_line: ModeLine,
     pub command_bar: CommandBar,
+    pub toast_overlay: adw::ToastOverlay,
 }
 
 const PLACEHOLDER_CHATS: &[&str] = &["Family", "Work", "Linux Linux Linux"];
@@ -60,10 +61,16 @@ pub fn build(app: &adw::Application, cfg: &Config) -> WindowParts {
     let mode_line = ModeLine::new();
     let command_bar = CommandBar::new();
 
+    // ToastOverlay wraps the split view so toasts hover over the chat
+    // body without overlapping the command bar / mode line.
+    let toast_overlay = adw::ToastOverlay::new();
+    toast_overlay.set_child(Some(&split));
+    toast_overlay.set_vexpand(true);
+
     let root = gtk::Box::builder()
         .orientation(gtk::Orientation::Vertical)
         .build();
-    root.append(&split);
+    root.append(&toast_overlay);
     root.append(command_bar.widget());
     root.append(mode_line.widget());
 
@@ -91,6 +98,7 @@ pub fn build(app: &adw::Application, cfg: &Config) -> WindowParts {
         composer,
         mode_line,
         command_bar,
+        toast_overlay,
     }
 }
 
