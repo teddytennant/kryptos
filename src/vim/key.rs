@@ -125,6 +125,7 @@ impl FromStr for Key {
 
         if !s.starts_with('<') {
             let mut chars = s.chars();
+            // SAFETY: !is_empty + starts_with check above ensure ≥1 char.
             let c = chars.next().unwrap();
             if chars.next().is_some() {
                 return Err(Error::Config(format!("multi-char key without <…>: {s:?}")));
@@ -142,6 +143,7 @@ impl FromStr for Key {
 
         // Last segment is the keysym; preceding ones are modifier flags.
         let parts: Vec<&str> = inner.split('-').collect();
+        // SAFETY: str::split always yields ≥1 element, so split_last is Some.
         let (sym_str, mod_strs) = parts.split_last().unwrap();
         if sym_str.is_empty() {
             return Err(Error::Config(format!("missing keysym in {s:?}")));
@@ -163,6 +165,7 @@ impl FromStr for Key {
         }
 
         let sym = if sym_str.chars().count() == 1 {
+            // SAFETY: count() == 1 above guarantees one char is present.
             KeySym::Char(sym_str.chars().next().unwrap())
         } else {
             KeySym::named(*sym_str)
