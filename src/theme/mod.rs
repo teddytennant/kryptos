@@ -13,6 +13,7 @@
 //! main thread via `glib::idle_add_once`.
 
 pub mod builtin;
+pub mod swatch;
 
 use std::path::PathBuf;
 use std::sync::mpsc::{channel as std_channel, Receiver as StdReceiver};
