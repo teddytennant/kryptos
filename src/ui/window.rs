@@ -15,12 +15,15 @@
 //! └────────────────────────────────────────────┘
 //! ```
 
+use std::cell::RefCell;
 use std::collections::hash_map::DefaultHasher;
 use std::hash::{Hash, Hasher};
+use std::rc::Rc;
 
 use adw::prelude::*;
 
 use crate::config::Config;
+use crate::messenger::{ChatId, ConversationSummary, NormalizedMessage};
 
 use super::composer::Composer;
 use super::onboarding;
@@ -31,47 +34,103 @@ use super::statusline::{CommandBar, ModeLine};
 pub struct WindowParts {
     pub window: adw::ApplicationWindow,
     pub sidebar_list: gtk::ListBox,
+    pub sidebar_scroller: gtk::ScrolledWindow,
+    pub sidebar_empty: gtk::Widget,
     pub composer: Composer,
     pub mode_line: ModeLine,
     pub command_bar: CommandBar,
     pub toast_overlay: adw::ToastOverlay,
+    /// Title widget for the content header — updated when the active
+    /// conversation changes.
+    pub content_title: adw::WindowTitle,
+    /// Box that holds rendered message rows; rebuilt on chat switch and
+    /// appended-to when a new event lands.
+    pub messages_box: gtk::Box,
+    /// Sidebar rows in the same order as the conversation list, paired
+    /// with their `ChatId`s. The dispatcher reads this when the user
+    /// clicks (or `j`/`k`s) to a row to find the active chat id.
+    pub sidebar_index: Rc<RefCell<Vec<(ChatId, gtk::ListBoxRow)>>>,
 }
 
-/// Static placeholder rows: (display name, last-message preview, timestamp).
-/// Real data comes from the cache once the conversation list is wired up;
-/// this is purely for visual rhythm at design time.
-const PLACEHOLDER_CHATS: &[(&str, &str, &str)] = &[
-    ("Family", "On our way home now.", "12:42"),
-    ("Work", "ack — pushing the patch", "11:08"),
-    ("Linux Linux Linux", "btw arch is now self-hosting", "Mon"),
-];
+impl WindowParts {
+    /// Replace the sidebar rows with `convs`, in order. Empty input
+    /// keeps the empty-state visible. The selection is preserved when
+    /// the previously-selected chat id is still in the new list.
+    pub fn set_conversations(&self, convs: &[ConversationSummary]) {
+        let prev = self
+            .sidebar_list
+            .selected_row()
+            .and_then(|row| {
+                self.sidebar_index
+                    .borrow()
+                    .iter()
+                    .find(|(_, r)| r == &row)
+                    .map(|(id, _)| id.clone())
+            });
 
-/// Placeholder messages: `(mine, body, ts_ms)`. Timestamps are absolute
-/// epoch ms so the date-divider + 2-min-clustering builder can reason
-/// about gaps without pulling in chrono. The labels rendered in the UI
-/// are computed from these by `format_clock_label` / `day_label`.
-const PLACEHOLDER_MESSAGES: &[(bool, &str, i64)] = &[
-    // Yesterday — afternoon.
-    (
-        false,
-        "Pushed the rebase, take a look when you can.",
-        -76_980_000,
-    ),
-    (true, "Yeah, give me 5.", -76_920_000),
-    (true, "Looks clean. Merging.", -75_600_000),
-    // Today — early.
-    (
-        false,
-        "Hey, did you see the new Kryptos release?",
-        -14_400_000,
-    ),
-    (false, "Vim modes everywhere. It's wonderful.", -14_280_000),
-    // Today — recent cluster from "me".
-    (true, "Not yet — what's in it?", -120_000),
-    (true, "Tell me it has dd.", -60_000),
-    (true, "And gg.", -30_000),
-    (false, "Try `:help` once you boot it.", -10_000),
-];
+        while let Some(row) = self.sidebar_list.row_at_index(0) {
+            self.sidebar_list.remove(&row);
+        }
+        self.sidebar_index.borrow_mut().clear();
+
+        for c in convs {
+            let ts_label = c
+                .last_message_ts
+                .map(format_clock_label)
+                .unwrap_or_default();
+            let row = chat_row(&c.title, "", &ts_label);
+            self.sidebar_list.append(&row);
+            self.sidebar_index
+                .borrow_mut()
+                .push((c.id.clone(), row.clone()));
+        }
+
+        let has_rows = self.sidebar_list.row_at_index(0).is_some();
+        self.sidebar_scroller.set_visible(has_rows);
+        self.sidebar_empty.set_visible(!has_rows);
+
+        if has_rows {
+            // Try to keep the same chat selected; otherwise default to
+            // the top row so the right pane is never empty when there
+            // is conversation data to show.
+            let target = prev
+                .and_then(|id| {
+                    self.sidebar_index
+                        .borrow()
+                        .iter()
+                        .find(|(cid, _)| cid == &id)
+                        .map(|(_, r)| r.clone())
+                })
+                .or_else(|| self.sidebar_list.row_at_index(0));
+            if let Some(row) = target {
+                self.sidebar_list.select_row(Some(&row));
+            }
+        }
+    }
+
+    /// Replace the messages view with `msgs`, ordered oldest-first.
+    /// The content header title is set from `active.native` so the
+    /// user always knows which chat they're looking at.
+    #[allow(dead_code)] // exposed for the dispatcher; used via cloned widgets in mod.rs.
+    pub fn set_messages(&self, msgs: &[NormalizedMessage], active: &ChatId) {
+        while let Some(child) = self.messages_box.first_child() {
+            self.messages_box.remove(&child);
+        }
+        self.content_title.set_title(&active.native);
+
+        if msgs.is_empty() {
+            self.messages_box.append(&messages_empty_state());
+            return;
+        }
+
+        let now = now_ms();
+        let rows: Vec<(bool, String, i64)> = msgs
+            .iter()
+            .map(|m| (is_mine(m), m.body.clone().unwrap_or_default(), m.ts_ms))
+            .collect();
+        populate_messages(&self.messages_box, &rows, now);
+    }
+}
 
 pub fn build(app: &adw::Application, cfg: &Config) -> WindowParts {
     // Force JetBrains Mono Nerd Font as the default app face *before* any
@@ -79,11 +138,15 @@ pub fn build(app: &adw::Application, cfg: &Config) -> WindowParts {
     // this after `build_*` would leave existing widgets at the old metric.
     apply_default_font();
 
+    let sidebar_index = Rc::new(RefCell::new(Vec::<(ChatId, gtk::ListBoxRow)>::new()));
+
     let sidebar_list = build_sidebar_list();
     let sidebar_search = build_sidebar_search();
     let sidebar_empty = build_sidebar_empty_state();
-    let sidebar = build_sidebar(&sidebar_list, &sidebar_search, &sidebar_empty);
-    let (content, composer, prefs_button, link_button) = build_content();
+    let (sidebar, sidebar_scroller) =
+        build_sidebar(&sidebar_list, &sidebar_search, &sidebar_empty);
+    let (content, composer, prefs_button, link_button, content_title, messages_box) =
+        build_content();
 
     let split = adw::OverlaySplitView::builder()
         .sidebar(&sidebar)
@@ -134,10 +197,15 @@ pub fn build(app: &adw::Application, cfg: &Config) -> WindowParts {
     WindowParts {
         window,
         sidebar_list,
+        sidebar_scroller,
+        sidebar_empty,
         composer,
         mode_line,
         command_bar,
         toast_overlay,
+        content_title,
+        messages_box,
+        sidebar_index,
     }
 }
 
@@ -146,15 +214,6 @@ fn build_sidebar_list() -> gtk::ListBox {
         .selection_mode(gtk::SelectionMode::Single)
         .build();
     list.add_css_class("navigation-sidebar");
-
-    for (name, preview, ts) in PLACEHOLDER_CHATS {
-        list.append(&chat_row(name, preview, ts));
-    }
-
-    if let Some(first) = list.row_at_index(0) {
-        list.select_row(Some(&first));
-    }
-
     list
 }
 
@@ -162,7 +221,7 @@ fn build_sidebar_list() -> gtk::ListBox {
 /// initial, name (semibold) + timestamp on the top line, last-message
 /// preview (dim) on the bottom. `chat-row`-class is on the outer row so
 /// the palette CSS can paint hover, selection, and the accent stripe.
-fn chat_row(name: &str, preview: &str, timestamp: &str) -> gtk::ListBoxRow {
+pub(super) fn chat_row(name: &str, preview: &str, timestamp: &str) -> gtk::ListBoxRow {
     let initial = name
         .chars()
         .next()
@@ -242,7 +301,7 @@ fn build_sidebar(
     list: &gtk::ListBox,
     search: &gtk::SearchEntry,
     empty_state: &gtk::Widget,
-) -> gtk::Widget {
+) -> (gtk::Widget, gtk::ScrolledWindow) {
     let title = adw::WindowTitle::new("Chats", "");
     let header = adw::HeaderBar::builder().title_widget(&title).build();
     header.add_css_class("flat");
@@ -278,7 +337,7 @@ fn build_sidebar(
     let toolbar = adw::ToolbarView::new();
     toolbar.add_top_bar(&header);
     toolbar.set_content(Some(&body));
-    toolbar.upcast::<gtk::Widget>()
+    (toolbar.upcast::<gtk::Widget>(), scroller)
 }
 
 /// Sidebar empty state shown when no chats exist yet. The "Link to
@@ -315,9 +374,17 @@ fn build_sidebar_empty_state() -> gtk::Widget {
     column.upcast::<gtk::Widget>()
 }
 
-fn build_content() -> (gtk::Widget, Composer, gtk::Button, gtk::Button) {
+fn build_content() -> (
+    gtk::Widget,
+    Composer,
+    gtk::Button,
+    gtk::Button,
+    adw::WindowTitle,
+    gtk::Box,
+) {
+    let content_title = adw::WindowTitle::new("Kryptos", "");
     let header = adw::HeaderBar::builder()
-        .title_widget(&adw::WindowTitle::new(PLACEHOLDER_CHATS[0].0, ""))
+        .title_widget(&content_title)
         .build();
     header.add_css_class("flat");
 
@@ -344,11 +411,9 @@ fn build_content() -> (gtk::Widget, Composer, gtk::Button, gtk::Button) {
     messages_box.set_margin_top(24);
     messages_box.set_margin_bottom(16);
 
-    if PLACEHOLDER_MESSAGES.is_empty() {
-        messages_box.append(&messages_empty_state());
-    } else {
-        populate_messages(&messages_box, PLACEHOLDER_MESSAGES);
-    }
+    // Start with the empty-state — real messages get rendered the
+    // moment a sidebar row is selected.
+    messages_box.append(&messages_empty_state());
 
     let messages_scroll = gtk::ScrolledWindow::builder()
         .hscrollbar_policy(gtk::PolicyType::Never)
@@ -381,6 +446,8 @@ fn build_content() -> (gtk::Widget, Composer, gtk::Button, gtk::Button) {
         composer,
         prefs_button,
         link_button,
+        content_title,
+        messages_box,
     )
 }
 
@@ -397,7 +464,7 @@ fn build_content() -> (gtk::Widget, Composer, gtk::Button, gtk::Button) {
 ///   tighten the bottom-side corner.
 /// - The vertical gap between the bubble and its same-sender
 ///   neighbours is collapsed to 0 via CSS on `.cluster-{top,middle,bottom}`.
-fn message_row(
+pub(super) fn message_row(
     mine: bool,
     body: &str,
     ts_label: &str,
@@ -437,30 +504,32 @@ fn message_row(
     row.upcast::<gtk::Widget>()
 }
 
-// --- Date / clustering helpers (placeholder data only; chat-history -----
-// rendering will reuse these once the cache feed is wired). --------------
+// --- Date / clustering helpers ------------------------------------------
+//
+// Day buckets are derived from a `now_ms` reference passed in by the
+// caller (so tests stay deterministic and we don't surprise the user
+// with a "Today" label after midnight). Older days get a fixed "Earlier"
+// label; pulling in chrono just for `Mon, Apr 28` would balloon the
+// build for one cosmetic line.
 
-/// Day buckets relative to "today" (in millis-since-epoch units used by
-/// the placeholder data, where `0` == today). Anything older than
-/// "yesterday" gets a static absolute label.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Day {
     Today,
     Yesterday,
-    Older(i64),
+    Older,
 }
 
-/// 24h * 3600s * 1000ms.
 const ONE_DAY_MS: i64 = 86_400_000;
 const TWO_MIN_MS: i64 = 120_000;
 
-fn day_for(ts_ms: i64) -> Day {
-    if ts_ms > -ONE_DAY_MS {
+fn day_for(ts_ms: i64, now_ms: i64) -> Day {
+    let delta = now_ms - ts_ms;
+    if delta < ONE_DAY_MS {
         Day::Today
-    } else if ts_ms > -2 * ONE_DAY_MS {
+    } else if delta < 2 * ONE_DAY_MS {
         Day::Yesterday
     } else {
-        Day::Older(ts_ms)
+        Day::Older
     }
 }
 
@@ -468,29 +537,19 @@ fn day_label(d: Day) -> &'static str {
     match d {
         Day::Today => "Today",
         Day::Yesterday => "Yesterday",
-        // Placeholder data doesn't reach back past yesterday, but if it
-        // did we'd format `Mon, Apr 28` here. Hardcoded so we don't pull
-        // in chrono.
-        Day::Older(_) => "Earlier",
+        Day::Older => "Earlier",
     }
 }
 
-/// Render placeholder timestamps as "12:42". The data is relative-to-now
-/// negative offsets, so we pretend "now" is 12:42 and subtract minutes.
-/// Chat-history feed will replace this with real wall-clock formatting.
-fn format_clock_label(ts_ms: i64) -> String {
-    // Anchor: pretend now = 12:42. Mins below = ts_ms / 60_000 (negative).
-    const NOW_HOURS: i64 = 12;
-    const NOW_MINS: i64 = 42;
-    let mins_ago = (-ts_ms) / 60_000;
-    let total_now = NOW_HOURS * 60 + NOW_MINS;
-    let mut total = total_now - mins_ago;
-    // Wrap into a 24h day for older messages.
-    while total < 0 {
-        total += 24 * 60;
-    }
-    let h = (total / 60) % 24;
-    let m = total % 60;
+/// Render an absolute epoch-ms timestamp as a 24h "HH:MM" wall-clock
+/// label. We don't pull in `chrono`'s `clock` feature (which would drag
+/// in `iana-time-zone`) just for a label, so this is a pure UTC clock —
+/// the offset bake-in can come later as a config knob.
+pub(super) fn format_clock_label(ts_ms: i64) -> String {
+    let secs = ts_ms.div_euclid(1000);
+    let day_secs = secs.rem_euclid(86_400);
+    let h = (day_secs / 3600) % 24;
+    let m = (day_secs / 60) % 60;
     format!("{h:02}:{m:02}")
 }
 
@@ -505,7 +564,7 @@ fn date_divider(text: &str) -> gtk::Widget {
 
 /// Empty-state for an empty conversation: a thin glyph at low opacity
 /// and a quietly framed instruction.
-fn messages_empty_state() -> gtk::Widget {
+pub(super) fn messages_empty_state() -> gtk::Widget {
     let glyph = gtk::Label::builder()
         .label("◯")
         .halign(gtk::Align::Center)
@@ -538,13 +597,16 @@ fn messages_empty_state() -> gtk::Widget {
     column.upcast::<gtk::Widget>()
 }
 
-/// Walk `msgs` once, inserting a `.date-divider` when the day changes
+/// Walk `rows` once, inserting a `.date-divider` when the day changes
 /// and tagging each row with its cluster role (top/middle/bottom/solo).
 /// A "cluster" is a run of same-sender messages within 2 minutes.
-fn populate_messages(messages_box: &gtk::Box, msgs: &[(bool, &str, i64)]) {
+///
+/// `rows` is a flat `(mine, body, ts_ms)` view so the same builder works
+/// for placeholders, pending optimistic sends, and real history.
+pub(super) fn populate_messages(messages_box: &gtk::Box, rows: &[(bool, String, i64)], now_ms: i64) {
     let mut prev_day: Option<Day> = None;
-    for (i, (mine, body, ts)) in msgs.iter().enumerate() {
-        let day = day_for(*ts);
+    for (i, (mine, body, ts)) in rows.iter().enumerate() {
+        let day = day_for(*ts, now_ms);
         if prev_day != Some(day) {
             messages_box.append(&date_divider(day_label(day)));
             prev_day = Some(day);
@@ -552,16 +614,16 @@ fn populate_messages(messages_box: &gtk::Box, msgs: &[(bool, &str, i64)]) {
 
         // Cluster boundaries: top = no same-sender within 2min above
         // (or day changed); bottom = same condition below.
-        let cluster_top = match i.checked_sub(1).and_then(|j| msgs.get(j)) {
+        let cluster_top = match i.checked_sub(1).and_then(|j| rows.get(j)) {
             Some((m, _, prev_ts)) => {
-                let prev_day_for = day_for(*prev_ts);
+                let prev_day_for = day_for(*prev_ts, now_ms);
                 *m != *mine || prev_day_for != day || (ts - prev_ts).abs() > TWO_MIN_MS
             }
             None => true,
         };
-        let cluster_bottom = match msgs.get(i + 1) {
+        let cluster_bottom = match rows.get(i + 1) {
             Some((m, _, next_ts)) => {
-                let next_day = day_for(*next_ts);
+                let next_day = day_for(*next_ts, now_ms);
                 *m != *mine || next_day != day || (next_ts - ts).abs() > TWO_MIN_MS
             }
             None => true,
@@ -576,6 +638,32 @@ fn populate_messages(messages_box: &gtk::Box, msgs: &[(bool, &str, i64)]) {
             cluster_bottom,
         ));
     }
+}
+
+/// Coarse "now" used by the date-divider helper. Reads system time
+/// monotonically; falls back to 0 only if the clock somehow predates
+/// UNIX epoch.
+fn now_ms() -> i64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_millis() as i64)
+        .unwrap_or(0)
+}
+
+/// True if the message belongs to the local user. signal-cli marks our
+/// own outbound messages by setting `sender == self_account`; we don't
+/// have that account string here, so the convention is that the caller
+/// pre-tags ours with a synthetic `"me"` sender, or — for incoming
+/// messages — the `sender` matches one of the known self-numbers.
+///
+/// In v1 we rely on the simpler heuristic the cache already provides:
+/// the conversation id pinpoints the *other* party, so any message
+/// whose `sender` differs from the conversation native id is "mine".
+/// That's correct for one-to-ones (the only case the placeholder data
+/// covered) and is a reasonable approximation for groups until we wire
+/// the real account number through.
+fn is_mine(msg: &NormalizedMessage) -> bool {
+    msg.sender == "me" || msg.sender != msg.id.native
 }
 
 /// JetBrains Mono Nerd Font as the system face. Setting `gtk-font-name`
@@ -948,17 +1036,21 @@ mod tests {
 
     #[test]
     fn day_for_buckets_relative_to_now() {
-        assert_eq!(day_for(0), Day::Today);
-        assert_eq!(day_for(-3_600_000), Day::Today);
-        assert_eq!(day_for(-86_400_001), Day::Yesterday);
-        assert!(matches!(day_for(-200_000_000), Day::Older(_)));
+        let now = 86_400_000 * 10; // pretend "now" is day 10
+        assert_eq!(day_for(now, now), Day::Today);
+        assert_eq!(day_for(now - 3_600_000, now), Day::Today);
+        assert_eq!(day_for(now - 86_400_001, now), Day::Yesterday);
+        assert_eq!(day_for(now - 3 * 86_400_000, now), Day::Older);
     }
 
     #[test]
     fn format_clock_label_is_zero_padded() {
-        let s = format_clock_label(0);
-        assert_eq!(s, "12:42");
-        // 5 minutes ago: 12:37.
-        assert_eq!(format_clock_label(-5 * 60_000), "12:37");
+        // 00:00 UTC at the unix epoch.
+        assert_eq!(format_clock_label(0), "00:00");
+        // 12:34 UTC of an arbitrary day: 12 * 3600 + 34 * 60 = 45_240 seconds.
+        assert_eq!(format_clock_label(45_240 * 1000), "12:34");
+        // Negative timestamps round toward minus infinity, so
+        // -1ms is "23:59" of the previous day.
+        assert_eq!(format_clock_label(-1), "23:59");
     }
 }
