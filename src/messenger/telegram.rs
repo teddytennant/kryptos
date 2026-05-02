@@ -732,4 +732,27 @@ mod tests {
         let raw = test_helpers::fake_raw_update();
         assert!(update_to_event(raw).is_none());
     }
+
+    /// `TelegramBackend::open` should bail with `Error::Telegram(_)` —
+    /// not panic, not bubble up an opaque io error — when the session
+    /// path is unusable. We exercise the path by handing it an
+    /// existing *directory*: `Session::load_file_or_create` sees
+    /// `path.exists() == true`, calls `load_file`, and `read_to_end`
+    /// fails with `EISDIR`. The `?` chain converts that into our
+    /// flattened `Error::Telegram` variant before any network I/O is
+    /// attempted, so the test stays hermetic.
+    #[tokio::test]
+    async fn open_with_directory_session_path_returns_telegram_error() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        // Pass the directory itself as the "session file".
+        // `TelegramBackend` is not `Debug` so we can't use `expect_err`
+        // — match on Result directly.
+        match TelegramBackend::open(1, "deadbeef", tmp.path()).await {
+            Ok(_) => panic!("opening with a dir session path must fail"),
+            Err(e) => assert!(
+                matches!(e, Error::Telegram(_)),
+                "want Error::Telegram(_), got {e:?}"
+            ),
+        }
+    }
 }

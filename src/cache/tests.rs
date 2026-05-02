@@ -230,6 +230,26 @@ async fn mark_read_zeroes_unread_count() {
     assert_eq!(listed[0].unread_count, 0);
 }
 
+/// A syntactically broken raw query against an in-memory cache must
+/// surface as [`crate::core::Error::Sqlx`] rather than panic. Locks in
+/// the `From<sqlx::Error>` wiring on our `Error` enum.
+#[tokio::test(flavor = "multi_thread")]
+async fn bad_raw_query_returns_sqlx_error() {
+    use crate::core::Error;
+    let cache = Cache::open_in_memory().await.unwrap();
+    let res: Result<(i64,), sqlx::Error> = sqlx::query_as("SELECT FROM not_a_table")
+        .fetch_one(cache.pool())
+        .await;
+    let sqlx_err = res.expect_err("bad SQL must fail");
+    let our_err: Error = sqlx_err.into();
+    assert!(
+        matches!(our_err, Error::Sqlx(_)),
+        "want Error::Sqlx(_), got {our_err:?}"
+    );
+    // Round-trip the Display path too — many callers `format!("{e}")` it.
+    assert!(format!("{our_err}").starts_with("sqlx:"));
+}
+
 /// Ties on `last_message_ts` are stable but unspecified at the SQL
 /// level; the contract we lock down here is "ties don't crash and
 /// don't drop rows." If the UI later wants a deterministic tie-break
