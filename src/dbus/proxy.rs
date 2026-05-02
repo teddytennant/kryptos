@@ -1,9 +1,12 @@
 //! Type-safe zbus proxies for the signal-cli D-Bus API.
 //!
-//! Mirrors the surface Kryptos consumes. Interface specs:
+//! signal-cli uses camelCase D-Bus method names (e.g. `listAccounts`,
+//! not `ListAccounts`); we override every method's `name` so zbus
+//! doesn't translate snake_case → PascalCase. Interface specs:
 //! <https://github.com/AsamK/signal-cli/blob/master/man/signal-cli-dbus.5.adoc>.
 
 use zbus::proxy;
+use zbus::zvariant::OwnedObjectPath;
 
 /// Multi-account control interface, exposed by signal-cli at
 /// `/org/asamk/Signal`. Used for registration and device linking.
@@ -13,12 +16,10 @@ use zbus::proxy;
     default_path = "/org/asamk/Signal"
 )]
 pub trait SignalControl {
-    /// Register a new account. signal-cli will deliver an SMS or voice
-    /// verification code to `number`. Follow up with [`verify`].
+    #[zbus(name = "register")]
     fn register(&self, number: &str, voice_verification: bool) -> zbus::Result<()>;
 
-    /// Same as `register` but solves a captcha challenge (required by the
-    /// Signal server when registration without one is blocked).
+    #[zbus(name = "registerWithCaptcha")]
     fn register_with_captcha(
         &self,
         number: &str,
@@ -26,18 +27,21 @@ pub trait SignalControl {
         captcha: &str,
     ) -> zbus::Result<()>;
 
-    /// Provide the SMS / voice verification code, completing registration.
+    #[zbus(name = "verify")]
     fn verify(&self, number: &str, verify_code: &str) -> zbus::Result<()>;
 
     /// Link as a secondary device. Returns a `tsdevice://...` URI to
     /// render as a QR code; the primary device scans it to authorise.
+    #[zbus(name = "link")]
     fn link(&self, new_device_name: &str) -> zbus::Result<String>;
 
-    /// signal-cli version string.
+    #[zbus(name = "version")]
     fn version(&self) -> zbus::Result<String>;
 
-    /// All locally configured accounts (each E.164 number).
-    fn list_accounts(&self) -> zbus::Result<Vec<String>>;
+    /// All locally configured accounts. signal-cli returns object paths
+    /// like `/org/asamk/Signal/_+12025551234`, *not* plain numbers.
+    #[zbus(name = "listAccounts")]
+    fn list_accounts(&self) -> zbus::Result<Vec<OwnedObjectPath>>;
 }
 
 /// Per-account messaging interface. In single-account mode, lives at
@@ -49,8 +53,7 @@ pub trait SignalControl {
     default_path = "/org/asamk/Signal"
 )]
 pub trait Signal {
-    /// Send a plain-text message to a single recipient.
-    /// Returns the timestamp signal-cli assigned to the message.
+    #[zbus(name = "sendMessage")]
     fn send_message(
         &self,
         message: &str,
@@ -58,7 +61,7 @@ pub trait Signal {
         recipient: &str,
     ) -> zbus::Result<i64>;
 
-    /// Send a plain-text message to a group.
+    #[zbus(name = "sendGroupMessage")]
     fn send_group_message(
         &self,
         message: &str,
@@ -66,12 +69,11 @@ pub trait Signal {
         group_id: &[u8],
     ) -> zbus::Result<i64>;
 
-    /// Mark a set of messages as read on a 1:1 conversation.
+    #[zbus(name = "sendReadReceipt")]
     fn send_read_receipt(&self, recipient: &str, message_ids: &[i64]) -> zbus::Result<()>;
 
-    /// Emitted on incoming 1:1 messages. Owned types are required here
-    /// because `&[&str]` can't be deserialized from a D-Bus message body.
-    #[zbus(signal)]
+    /// Emitted on incoming 1:1 messages.
+    #[zbus(signal, name = "MessageReceived")]
     fn message_received(
         &self,
         timestamp: i64,

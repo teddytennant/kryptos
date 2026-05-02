@@ -61,7 +61,11 @@ impl SignalClient {
 
     pub async fn list_accounts(&self) -> Result<Vec<String>> {
         let proxy = SignalControlProxy::new(&self.conn).await?;
-        Ok(proxy.list_accounts().await?)
+        let paths = proxy.list_accounts().await?;
+        Ok(paths
+            .into_iter()
+            .filter_map(|p| account_from_object_path(p.as_str()))
+            .collect())
     }
 
     pub async fn version(&self) -> Result<String> {
@@ -140,6 +144,19 @@ impl SignalClient {
 fn account_object_path(account: &str) -> String {
     let digits: String = account.chars().filter(|c| c.is_ascii_digit()).collect();
     format!("/org/asamk/Signal/_{digits}")
+}
+
+/// Reverse of [`account_object_path`]: pull the E.164 number back out of
+/// a `/org/asamk/Signal/_<digits>` path. Tolerates a leading `+` after
+/// `_` (newer signal-cli) and bare digits (older).
+fn account_from_object_path(path: &str) -> Option<String> {
+    let leaf = path.rsplit('/').next()?;
+    let body = leaf.strip_prefix('_').unwrap_or(leaf);
+    let digits: String = body.chars().filter(|c| c.is_ascii_digit()).collect();
+    if digits.is_empty() {
+        return None;
+    }
+    Some(format!("+{digits}"))
 }
 
 pub(crate) fn validate_phone_number(s: &str) -> Result<()> {
