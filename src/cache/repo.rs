@@ -1,7 +1,7 @@
 //! Repository-style methods on [`Cache`].
 //!
 //! Each method is a single SQL operation (or short transaction) against the
-//! pool. Returns are owned plain values from [`models`] — no sqlx types leak.
+//! pool. Returns are owned plain values from [`super::models`] — no sqlx types leak.
 
 use sqlx::Row;
 

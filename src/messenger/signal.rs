@@ -4,7 +4,7 @@
 //! A single `SignalBackend` is bound to one signal-cli account (the
 //! E.164 number passed at construction). Multi-account use means
 //! constructing one `SignalBackend` per account and adding each to the
-//! [`MessengerHub`].
+//! [`MessengerHub`](crate::messenger::MessengerHub).
 
 use std::path::PathBuf;
 use std::sync::Arc;

@@ -7,7 +7,7 @@
 //! - [`SignalBackend`](signal::SignalBackend) — wraps [`crate::dbus::SignalClient`].
 //! - [`TelegramBackend`](telegram::TelegramBackend) — `grammers-client` (stub
 //!   today; activated once the dependency is wired in).
-//! - [`MessengerHub`](hub::MessengerHub) — fans every backend's event stream
+//! - [`MessengerHub`] — fans every backend's event stream
 //!   into a single channel and routes outbound calls by [`Backend`].
 //!
 //! All chat IDs travel as [`ChatId`] (`backend + native id`) so the UI can
@@ -82,8 +82,8 @@ impl ChatId {
         format!("{}:{}", self.backend.as_tag(), self.native)
     }
 
-    /// Parse the inverse of [`to_wire`]. Returns `None` for any malformed
-    /// input (missing colon, unknown tag, empty native).
+    /// Parse the inverse of [`Self::to_wire`]. Returns `None` for any
+    /// malformed input (missing colon, unknown tag, empty native).
     pub fn from_wire(s: &str) -> Option<Self> {
         let (tag, native) = s.split_once(':')?;
         if native.is_empty() {
