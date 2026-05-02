@@ -229,3 +229,41 @@ async fn mark_read_zeroes_unread_count() {
     let listed = cache.list_conversations().await.unwrap();
     assert_eq!(listed[0].unread_count, 0);
 }
+
+/// Ties on `last_message_ts` are stable but unspecified at the SQL
+/// level; the contract we lock down here is "ties don't crash and
+/// don't drop rows." If the UI later wants a deterministic tie-break
+/// (e.g. by id / name) we add an `ORDER BY last_message_ts DESC, id`
+/// and tighten this test accordingly.
+#[tokio::test(flavor = "multi_thread")]
+async fn list_conversations_ties_keep_every_row() {
+    let cache = Cache::open_in_memory().await.unwrap();
+    cache
+        .upsert_conversation(&convo("alpha", Some(500)))
+        .await
+        .unwrap();
+    cache
+        .upsert_conversation(&convo("bravo", Some(500)))
+        .await
+        .unwrap();
+    cache
+        .upsert_conversation(&convo("charlie", Some(500)))
+        .await
+        .unwrap();
+    cache
+        .upsert_conversation(&convo("delta", Some(400)))
+        .await
+        .unwrap();
+
+    let listed = cache.list_conversations().await.unwrap();
+    assert_eq!(listed.len(), 4);
+    // First three (the 500-ts cluster) come before delta regardless of
+    // intra-tie order.
+    let ids: Vec<_> = listed.iter().map(|c| c.id.clone()).collect();
+    let delta_pos = ids.iter().position(|i| i == "delta").unwrap();
+    assert_eq!(delta_pos, 3, "delta with older ts must sort last");
+    // Every input id is present.
+    for want in ["alpha", "bravo", "charlie", "delta"] {
+        assert!(ids.iter().any(|i| i == want), "missing {want}");
+    }
+}

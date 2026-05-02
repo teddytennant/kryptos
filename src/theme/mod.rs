@@ -37,7 +37,7 @@ pub struct ThemeManager {
 impl ThemeManager {
     /// Build a manager and register its built-in `CssProvider` against the
     /// given display at `STYLE_PROVIDER_PRIORITY_APPLICATION`. The custom
-    /// provider is added lazily by [`reload_custom_css`].
+    /// provider is added lazily by [`Self::reload_custom_css`].
     pub fn install_for_display(display: &gdk::Display) -> Self {
         let builtin_provider = CssProvider::new();
         gtk::style_context_add_provider_for_display(

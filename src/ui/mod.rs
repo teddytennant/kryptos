@@ -2,10 +2,10 @@
 //!
 //! Module layout:
 //!
-//! - [`window`]      — widget tree construction.
-//! - [`statusline`]  — mode line + command/search bar widgets.
-//! - [`input`]       — gdk → [`crate::vim::Key`] translation.
-//! - [`dispatcher`]  — apply [`crate::vim::Action`]s to the widget tree.
+//! - `window`      — widget tree construction.
+//! - `statusline`  — mode line + command/search bar widgets.
+//! - `input`       — gdk → [`crate::vim::Key`] translation.
+//! - `dispatcher`  — apply [`crate::vim::Action`]s to the widget tree.
 //! - [`settings`]    — `adw::PreferencesWindow` over `~/.config/kryptos/config.toml`.
 //! - [`onboarding`]  — first-run device-link flow (QR + signal-cli polling).
 
