@@ -149,7 +149,7 @@ impl LinkerWindow {
         // Device name input + Generate button row.
         let name_entry = gtk::Entry::builder()
             .placeholder_text("Device name")
-            .text(&default_device_name())
+            .text(default_device_name())
             .hexpand(true)
             .build();
         name_entry.add_css_class("kryptos-linker-name");
@@ -356,7 +356,7 @@ fn spawn_link_flow(handles: LinkFlowHandles) {
                 let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
                     run_link_flow(&device_name, &tx)
                 }));
-                if let Err(_) = result {
+                if result.is_err() {
                     let _ = tx.send(LinkEvent::Error(
                         "internal error in linker worker".to_string(),
                     ));

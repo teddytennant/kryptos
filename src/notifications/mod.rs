@@ -175,9 +175,10 @@ mod tests {
     use pretty_assertions::assert_eq;
 
     fn cfg_with_notifications(n: NotificationConfig) -> Config {
-        let mut c = Config::default();
-        c.notifications = n;
-        c
+        Config {
+            notifications: n,
+            ..Default::default()
+        }
     }
 
     #[test]

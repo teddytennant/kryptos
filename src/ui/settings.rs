@@ -259,7 +259,7 @@ fn about_page() -> adw::PreferencesPage {
     group.add(&version);
 
     let repo_label = gtk::Label::builder()
-        .label(&format!("<a href=\"{REPO_URL}\">{REPO_URL}</a>"))
+        .label(format!("<a href=\"{REPO_URL}\">{REPO_URL}</a>"))
         .use_markup(true)
         .selectable(true)
         .build();
@@ -337,6 +337,7 @@ fn spawn_version_probe(row: adw::ActionRow) {
 struct DebouncedWriter {
     path: PathBuf,
     pending: RefCell<Option<glib::SourceId>>,
+    #[allow(clippy::type_complexity)]
     mutator: RefCell<Option<Box<dyn FnOnce(&mut Config)>>>,
 }
 

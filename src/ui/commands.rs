@@ -5,7 +5,7 @@
 //! widgets / disk / D-Bus and surfaces feedback through
 //! `adw::ToastOverlay`.
 
-use std::path::PathBuf;
+use std::path::Path;
 
 use crate::config::{loader, Config};
 use crate::core::{Error, Result};
@@ -158,7 +158,7 @@ fn parse_bool_set(value: Option<&str>, current: bool) -> std::result::Result<boo
 }
 
 /// Read config, mutate, and atomically rewrite. Used by `:set`.
-pub fn mutate_config_on_disk<F>(path: &PathBuf, mutate: F) -> Result<()>
+pub fn mutate_config_on_disk<F>(path: &Path, mutate: F) -> Result<()>
 where
     F: FnOnce(&mut Config) -> std::result::Result<(), String>,
 {

@@ -259,11 +259,9 @@ impl Composer {
         mode: ComposerMode,
     ) -> glib::Propagation {
         // Ctrl-modified bindings.
-        if ctrl {
-            if matches!(keyval, gdk::Key::r | gdk::Key::R) {
-                self.text_view.buffer().redo();
-                return glib::Propagation::Stop;
-            }
+        if ctrl && matches!(keyval, gdk::Key::r | gdk::Key::R) {
+            self.text_view.buffer().redo();
+            return glib::Propagation::Stop;
         }
 
         let visual = matches!(mode, ComposerMode::Visual | ComposerMode::VisualLine);
