@@ -34,8 +34,10 @@ use crate::core::{Error, Result};
 use crate::dbus::SignalClient;
 
 mod link_state;
+mod welcome;
 
 pub use link_state::{detect_new_account, LinkOutcome};
+pub use welcome::present as present_welcome;
 
 /// How often we ask signal-cli "did the link finish yet?".
 const POLL_INTERVAL: Duration = Duration::from_secs(2);

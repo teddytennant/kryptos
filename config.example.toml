@@ -59,3 +59,9 @@ api_hash = ""
 # Where grammers-session persists the auth blob. Empty means
 # $XDG_DATA_HOME/kryptos/telegram.session.
 session_path = ""
+
+# First-run onboarding bookkeeping. Once the welcome flow finishes (or
+# the user clicks "Skip onboarding") this flips to true and the welcome
+# window is never shown again.
+[onboarding]
+completed = false

@@ -10,6 +10,7 @@ pub struct Config {
     pub notifications: Notifications,
     pub appearance: Appearance,
     pub backends: Backends,
+    pub onboarding: Onboarding,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -108,6 +109,15 @@ pub struct TelegramBackendConfig {
     pub session_path: String,
 }
 
+/// First-run onboarding state. Once the user completes (or explicitly
+/// skips) the welcome flow we set `completed = true` so the welcome
+/// window doesn't reappear on subsequent launches.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct Onboarding {
+    pub completed: bool,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -165,5 +175,17 @@ session_path = "/tmp/tg.session"
     fn rejects_unknown_top_level() {
         let result: Result<Config, _> = toml::from_str("bogus = 1\n");
         assert!(result.is_err(), "expected unknown-field rejection");
+    }
+
+    #[test]
+    fn onboarding_default_is_not_completed() {
+        let cfg = Config::default();
+        assert!(!cfg.onboarding.completed);
+    }
+
+    #[test]
+    fn parses_onboarding_section() {
+        let cfg: Config = toml::from_str("[onboarding]\ncompleted = true\n").unwrap();
+        assert!(cfg.onboarding.completed);
     }
 }
