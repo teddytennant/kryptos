@@ -57,16 +57,13 @@ impl WindowParts {
     /// keeps the empty-state visible. The selection is preserved when
     /// the previously-selected chat id is still in the new list.
     pub fn set_conversations(&self, convs: &[ConversationSummary]) {
-        let prev = self
-            .sidebar_list
-            .selected_row()
-            .and_then(|row| {
-                self.sidebar_index
-                    .borrow()
-                    .iter()
-                    .find(|(_, r)| r == &row)
-                    .map(|(id, _)| id.clone())
-            });
+        let prev = self.sidebar_list.selected_row().and_then(|row| {
+            self.sidebar_index
+                .borrow()
+                .iter()
+                .find(|(_, r)| r == &row)
+                .map(|(id, _)| id.clone())
+        });
 
         while let Some(row) = self.sidebar_list.row_at_index(0) {
             self.sidebar_list.remove(&row);
@@ -143,8 +140,7 @@ pub fn build(app: &adw::Application, cfg: &Config) -> WindowParts {
     let sidebar_list = build_sidebar_list();
     let sidebar_search = build_sidebar_search();
     let sidebar_empty = build_sidebar_empty_state();
-    let (sidebar, sidebar_scroller) =
-        build_sidebar(&sidebar_list, &sidebar_search, &sidebar_empty);
+    let (sidebar, sidebar_scroller) = build_sidebar(&sidebar_list, &sidebar_search, &sidebar_empty);
     let (content, composer, prefs_button, link_button, content_title, messages_box) =
         build_content();
 
@@ -603,7 +599,11 @@ pub(super) fn messages_empty_state() -> gtk::Widget {
 ///
 /// `rows` is a flat `(mine, body, ts_ms)` view so the same builder works
 /// for placeholders, pending optimistic sends, and real history.
-pub(super) fn populate_messages(messages_box: &gtk::Box, rows: &[(bool, String, i64)], now_ms: i64) {
+pub(super) fn populate_messages(
+    messages_box: &gtk::Box,
+    rows: &[(bool, String, i64)],
+    now_ms: i64,
+) {
     let mut prev_day: Option<Day> = None;
     for (i, (mine, body, ts)) in rows.iter().enumerate() {
         let day = day_for(*ts, now_ms);
