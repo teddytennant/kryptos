@@ -8,6 +8,7 @@
 //! - [`dispatcher`]  — apply [`crate::vim::Action`]s to the widget tree.
 //! - [`settings`]    — `adw::PreferencesWindow` over `~/.config/kryptos/config.toml`.
 
+mod composer;
 mod dispatcher;
 mod input;
 pub mod settings;
@@ -61,6 +62,20 @@ fn activate(app: &adw::Application) {
     };
     let engine = Rc::new(RefCell::new(engine));
     let dispatcher = Dispatcher::from_parts(&parts);
+
+    // Composer-local Enter: when the user hits Enter in the composer
+    // itself (Normal or Insert), the composer's own controller fires
+    // first and ends up here. We log + sync the window-level engine
+    // back to Normal so the modeline reflects reality.
+    {
+        let engine = engine.clone();
+        let mode_line = parts.mode_line.clone();
+        parts.composer.set_on_send(move |text| {
+            info!(message = %text, "send message (composer Enter)");
+            engine.borrow_mut().set_mode(Mode::Normal);
+            mode_line.set_mode(Mode::Normal);
+        });
+    }
 
     wire_command_bar(&parts, &dispatcher, engine.clone());
     wire_keys(&parts, &dispatcher, engine.clone());

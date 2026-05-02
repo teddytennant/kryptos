@@ -19,6 +19,7 @@ use adw::prelude::*;
 
 use crate::config::Config;
 
+use super::composer::Composer;
 use super::settings::Settings;
 use super::statusline::{CommandBar, ModeLine};
 
@@ -27,7 +28,7 @@ pub struct WindowParts {
     pub window: adw::ApplicationWindow,
     pub sidebar_list: gtk::ListBox,
     pub content_title: adw::WindowTitle,
-    pub composer: gtk::TextView,
+    pub composer: Composer,
     pub mode_line: ModeLine,
     pub command_bar: CommandBar,
 }
@@ -163,7 +164,7 @@ fn build_sidebar(list: &gtk::ListBox) -> gtk::Widget {
     toolbar.upcast::<gtk::Widget>()
 }
 
-fn build_content() -> (gtk::Widget, adw::WindowTitle, gtk::TextView, gtk::Button) {
+fn build_content() -> (gtk::Widget, adw::WindowTitle, Composer, gtk::Button) {
     let title = adw::WindowTitle::new(PLACEHOLDER_CHATS[0], "");
     let header = adw::HeaderBar::builder().title_widget(&title).build();
 
@@ -191,17 +192,10 @@ fn build_content() -> (gtk::Widget, adw::WindowTitle, gtk::TextView, gtk::Button
         .child(&messages_box)
         .build();
 
-    let composer = gtk::TextView::builder()
-        .wrap_mode(gtk::WrapMode::WordChar)
-        .top_margin(8)
-        .bottom_margin(8)
-        .left_margin(12)
-        .right_margin(12)
-        .build();
-    composer.add_css_class("composer");
+    let composer = Composer::new();
 
     let composer_frame = gtk::Frame::new(None);
-    composer_frame.set_child(Some(&composer));
+    composer_frame.set_child(Some(composer.widget()));
     composer_frame.set_margin_start(12);
     composer_frame.set_margin_end(12);
     composer_frame.set_margin_bottom(12);
@@ -296,6 +290,31 @@ const STYLES: &str = r#"
 .composer-frame {
     border-radius: 8px;
 }
+
+.composer-mode-badge {
+    font-family: monospace;
+    font-size: 10px;
+    letter-spacing: 0.08em;
+    padding: 1px 6px;
+    border-radius: 3px;
+    color: alpha(@accent_color, 0.55);
+}
+.composer-insert .composer-mode-badge {
+    color: @accent_color;
+}
+.composer-visual .composer-mode-badge {
+    color: #f9e2af;
+}
+
+.kryptos-composer-wrapper.composer-normal {
+    caret-color: alpha(@accent_color, 0.85);
+}
+.kryptos-composer-wrapper.composer-insert {
+    caret-color: @accent_color;
+}
+.kryptos-composer-wrapper.composer-visual {
+    caret-color: #f9e2af;
+}
 "#;
 
 /// Helper: select the row N positions from the current selection in
@@ -320,14 +339,5 @@ pub fn move_sidebar_selection(list: &gtk::ListBox, delta: i32) {
         list.select_row(Some(&row));
         row.grab_focus();
     }
-}
-
-/// Pull the entire buffer text from the composer (used by SendMessage).
-pub fn drain_composer(composer: &gtk::TextView) -> String {
-    let buf = composer.buffer();
-    let (start, end) = buf.bounds();
-    let text = buf.text(&start, &end, false).to_string();
-    buf.set_text("");
-    text
 }
 
