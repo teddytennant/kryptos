@@ -29,11 +29,13 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use grammers_client::session::{PackedChat, Session};
 use grammers_client::{
-    types::{InputMessage, LoginToken},
-    Client, Config as GClientConfig, InitParams, SignInError,
+    types::{InputMessage, LoginToken, Update},
+    Client, Config as GClientConfig, InitParams, InvocationError, SignInError,
 };
 use grammers_tl_types as tl;
 use tokio::sync::{broadcast, mpsc, Mutex};
+use tokio::time::{sleep, Duration};
+use tracing::{debug, warn};
 
 use crate::core::{Error, Result};
 use crate::messenger::{
@@ -348,9 +350,7 @@ impl MessengerBackend for TelegramBackend {
     }
 
     async fn subscribe(&self) -> Result<mpsc::UnboundedReceiver<Event>> {
-        // Forwarder isn't wired to grammers yet; hand back a live
-        // (but empty) receiver so callers don't special-case telegram.
-        let _ = self.forwarder_started.lock().await;
+        self.ensure_forwarder().await;
         let mut bcast_rx = self.bus.subscribe();
         let (tx, rx) = mpsc::unbounded_channel();
         tokio::spawn(async move {
@@ -361,12 +361,67 @@ impl MessengerBackend for TelegramBackend {
                             break;
                         }
                     }
-                    Err(broadcast::error::RecvError::Lagged(_)) => {}
+                    Err(broadcast::error::RecvError::Lagged(n)) => {
+                        warn!(skipped = n, "telegram subscriber lagged, dropping events");
+                    }
                     Err(broadcast::error::RecvError::Closed) => break,
                 }
             }
         });
         Ok(rx)
+    }
+}
+
+impl TelegramBackend {
+    /// Lazily start the single update-pump task. The task loops on
+    /// [`Client::next_update`] and rebroadcasts each
+    /// [`Update`]-derived [`Event`] over the internal bus. Disconnects
+    /// are retried with exponential backoff capped at 60s so a flaky
+    /// network doesn't permanently silence the backend.
+    async fn ensure_forwarder(&self) {
+        let mut started = self.forwarder_started.lock().await;
+        if *started {
+            return;
+        }
+        let client = self.client.clone();
+        let bus = self.bus.clone();
+        tokio::spawn(async move {
+            // Backoff timer used only for non-poison errors. A
+            // disconnect bubbles up as `InvocationError::Read` (or
+            // similar transport variant); we don't try to discriminate
+            // — any error pauses, sleeps, then retries the next call.
+            let mut backoff = Duration::from_secs(1);
+            const MAX_BACKOFF: Duration = Duration::from_secs(60);
+
+            loop {
+                match client.next_update().await {
+                    Ok(update) => {
+                        backoff = Duration::from_secs(1);
+                        if let Some(ev) = update_to_event(update) {
+                            if bus.send(ev).is_err() {
+                                debug!("telegram forwarder: no live subscribers");
+                                // Don't break — keep pumping so a
+                                // future subscriber catches up.
+                            }
+                        }
+                    }
+                    Err(e) => {
+                        warn!(error = %e, "telegram next_update failed; backing off");
+                        sleep(backoff).await;
+                        backoff = (backoff * 2).min(MAX_BACKOFF);
+                        // If the error was a hard close (e.g.
+                        // `InvocationError::Dropped`), `next_update`
+                        // will keep yielding the same — the backoff
+                        // ceiling stops us from spinning hot.
+                        if matches!(e, InvocationError::Dropped) {
+                            debug!("telegram forwarder: client dropped, exiting");
+                            break;
+                        }
+                    }
+                }
+            }
+        });
+        *started = true;
     }
 }
 
@@ -400,6 +455,57 @@ fn message_to_normalized(
         // a download pass. Keep the slot honest by leaving it empty.
         attachments: Vec::<NormalizedAttachment>::new(),
         backend_extras: BackendExtras::Telegram { reply_to_msg_id },
+    }
+}
+
+/// Translate a grammers [`Update`] into our protocol-neutral
+/// [`Event`]. Returns `None` for variants we don't care about
+/// (callback queries, inline events, raw passthroughs) so the
+/// caller can simply `if let Some(ev) = update_to_event(u)` without
+/// allocating a noisy enum branch for every TL update kind.
+fn update_to_event(update: Update) -> Option<Event> {
+    match update {
+        Update::NewMessage(msg) => {
+            let chat = msg.chat();
+            let id = ChatId::new(Backend::Telegram, conv::packed_to_native(chat.pack()));
+            Some(Event::MessageReceived(message_to_normalized(&msg, &id)))
+        }
+        Update::MessageEdited(msg) => {
+            let chat = msg.chat();
+            let id = ChatId::new(Backend::Telegram, conv::packed_to_native(chat.pack()));
+            Some(Event::Edited {
+                id,
+                ts: conv::datetime_to_ms(msg.date()),
+                new_body: msg.text().to_string(),
+            })
+        }
+        Update::MessageDeleted(deletion) => {
+            // grammers' MessageDeletion only carries the optional
+            // channel_id and the message ids — it does not say which
+            // peer the message belonged to for non-channel chats.
+            // For channels we can synthesise a Channel ChatId; for
+            // 1:1 / small-group deletes we have no peer to attach,
+            // so skip rather than fabricate one.
+            let channel_id = deletion.channel_id()?;
+            let packed = PackedChat {
+                ty: grammers_client::session::PackedType::Megagroup,
+                id: channel_id,
+                access_hash: None,
+            };
+            Some(Event::Deleted {
+                id: ChatId::new(Backend::Telegram, conv::packed_to_native(packed)),
+                ts: 0,
+            })
+        }
+        // Bot / inline events aren't on the user-client critical
+        // path; surface them as `None` and let the bus drop them.
+        // grammers marks `Update` as `#[non_exhaustive]`, so the
+        // wildcard arm catches future additions too.
+        Update::CallbackQuery(_)
+        | Update::InlineQuery(_)
+        | Update::InlineSend(_)
+        | Update::Raw(_) => None,
+        _ => None,
     }
 }
 
@@ -476,6 +582,13 @@ pub(crate) mod test_helpers {
             access_hash: Some(access_hash),
         }
     }
+
+    /// Build a no-op `Update::Raw` for unit tests of [`update_to_event`]'s
+    /// fall-through arm. `UpdateAttachMenuBots` is a fieldless TL
+    /// constructor so it costs nothing to materialise.
+    pub fn fake_raw_update() -> Update {
+        Update::Raw(tl::enums::Update::AttachMenuBots)
+    }
 }
 
 #[cfg(test)]
@@ -530,6 +643,12 @@ mod tests {
     fn resolve_session_path_uses_explicit_string() {
         let p = resolve_session_path("/explicit/path.session");
         assert_eq!(p, PathBuf::from("/explicit/path.session"));
+    }
+
+    #[test]
+    fn update_to_event_drops_raw_passthroughs() {
+        let raw = test_helpers::fake_raw_update();
+        assert!(update_to_event(raw).is_none());
     }
 
     #[test]
