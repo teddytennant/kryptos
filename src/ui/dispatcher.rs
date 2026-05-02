@@ -8,10 +8,9 @@ use std::path::PathBuf;
 use std::rc::Rc;
 
 use adw::prelude::*;
-use tracing::{debug, error, info, warn};
+use tracing::{debug, error, info};
 
 use crate::config::loader;
-use crate::dbus::SignalClient;
 use crate::theme::ThemeManager;
 use crate::vim::{Action, Mode};
 
@@ -19,6 +18,7 @@ use super::commands::{
     apply_set, help_text, mutate_config_on_disk, parse_command, theme_names_csv, Command,
 };
 use super::composer::{Composer, ComposerMode};
+use super::onboarding;
 use super::settings::Settings;
 use super::statusline::CommandBar;
 use super::window::{move_sidebar_selection, WindowParts};
@@ -142,8 +142,7 @@ impl Dispatcher {
             Command::Set { key, value } => self.apply_set_to_disk(&key, value.as_deref()),
             Command::Reload => self.reload_config(),
             Command::Settings => Settings::open(&self.window),
-            Command::Link(None) => self.toast_error(":link requires a device name"),
-            Command::Link(Some(name)) => self.run_link(name),
+            Command::Link(_) => onboarding::open_linker(&self.window),
             Command::Help => self.toast_info(help_text()),
             Command::Unknown(head) => self.toast_error(&format!("unknown command: :{head}")),
         }
@@ -204,60 +203,6 @@ impl Dispatcher {
             Ok(()) => self.toast_info(&format!("reloaded — theme {}", cfg.general.theme)),
             Err(e) => self.toast_error(&format!("theme: {e}")),
         }
-    }
-
-    /// `:link <name>` — call signal-cli's link method on a worker
-    /// thread (it spins up its own current-thread runtime), then post
-    /// the resulting URI back as a toast on the GTK main loop.
-    fn run_link(&self, name: String) {
-        let toast_overlay = self.toast_overlay.clone();
-        let (tx, rx) = std::sync::mpsc::channel::<Result<String, String>>();
-        let spawn_result = std::thread::Builder::new()
-            .name("kryptos-link".into())
-            .spawn(move || {
-                let res = (|| {
-                    let rt = tokio::runtime::Builder::new_current_thread()
-                        .enable_all()
-                        .build()
-                        .map_err(|e| format!("runtime: {e}"))?;
-                    rt.block_on(async {
-                        let client = SignalClient::connect()
-                            .await
-                            .map_err(|e| format!("{e}"))?;
-                        client.link(&name).await.map_err(|e| format!("{e}"))
-                    })
-                })();
-                let _ = tx.send(res);
-            });
-        if let Err(e) = spawn_result {
-            warn!(error = %e, "link: thread spawn failed");
-            self.toast_error(&format!("link: {e}"));
-            return;
-        }
-
-        glib::source::timeout_add_local(std::time::Duration::from_millis(150), move || {
-            match rx.try_recv() {
-                Ok(Ok(uri)) => {
-                    info!(%uri, "link URI");
-                    let toast = adw::Toast::builder()
-                        .title(&format!("link: {uri}"))
-                        .timeout(0) // sticky — the URI is long; let the user dismiss.
-                        .build();
-                    toast_overlay.add_toast(toast);
-                    glib::ControlFlow::Break
-                }
-                Ok(Err(e)) => {
-                    warn!(error = %e, "link failed");
-                    let toast = adw::Toast::builder()
-                        .title(&format!("link failed: {e}"))
-                        .build();
-                    toast_overlay.add_toast(toast);
-                    glib::ControlFlow::Break
-                }
-                Err(std::sync::mpsc::TryRecvError::Empty) => glib::ControlFlow::Continue,
-                Err(std::sync::mpsc::TryRecvError::Disconnected) => glib::ControlFlow::Break,
-            }
-        });
     }
 
     fn toast_info(&self, msg: &str) {

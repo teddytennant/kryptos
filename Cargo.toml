@@ -34,6 +34,11 @@ sqlx = { version = "0.8", default-features = false, features = ["runtime-tokio",
 # Notifications
 notify-rust = "4"
 
+# QR rendering for the device-link onboarding flow. Default features
+# (image / svg) stay off — we draw the matrix straight to a Cairo
+# DrawingArea, so no encoder needs to be pulled in.
+qrcode = { version = "0.14", default-features = false }
+
 # Logging / errors
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }

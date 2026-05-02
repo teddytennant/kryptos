@@ -7,11 +7,13 @@
 //! - [`input`]       — gdk → [`crate::vim::Key`] translation.
 //! - [`dispatcher`]  — apply [`crate::vim::Action`]s to the widget tree.
 //! - [`settings`]    — `adw::PreferencesWindow` over `~/.config/kryptos/config.toml`.
+//! - [`onboarding`]  — first-run device-link flow (QR + signal-cli polling).
 
 mod commands;
 mod composer;
 mod dispatcher;
 mod input;
+pub mod onboarding;
 pub mod settings;
 mod statusline;
 mod window;
@@ -113,6 +115,55 @@ fn activate(app: &adw::Application) {
 
     parts.mode_line.set_mode(engine.borrow().mode());
     parts.window.present();
+
+    maybe_open_first_run_linker(&parts.window);
+}
+
+/// Off-thread first-run check. If signal-cli is reachable and reports
+/// zero accounts, we surface the linker non-modally on top of the
+/// freshly-presented main window. Any error path (no bus, no daemon)
+/// falls through to the main UI so the user is never trapped.
+fn maybe_open_first_run_linker(window: &adw::ApplicationWindow) {
+    use std::sync::mpsc;
+    use std::time::Duration;
+
+    use crate::dbus::SignalClient;
+
+    let (tx, rx) = mpsc::channel::<bool>();
+    std::thread::Builder::new()
+        .name("kryptos-first-run".into())
+        .spawn(move || {
+            let result = std::panic::catch_unwind(|| {
+                tokio::runtime::Builder::new_current_thread()
+                    .enable_all()
+                    .build()
+                    .ok()
+                    .map(|rt| {
+                        rt.block_on(async {
+                            match SignalClient::connect().await {
+                                Ok(c) => onboarding::first_run_check_async(&c).await,
+                                Err(_) => false,
+                            }
+                        })
+                    })
+                    .unwrap_or(false)
+            });
+            let _ = tx.send(result.unwrap_or(false));
+        })
+        .expect("spawn first-run probe thread");
+
+    let win = window.clone();
+    glib::source::timeout_add_local(Duration::from_millis(150), move || {
+        match rx.try_recv() {
+            Ok(true) => {
+                onboarding::open_linker(&win);
+                glib::ControlFlow::Break
+            }
+            Ok(false) => glib::ControlFlow::Break,
+            Err(mpsc::TryRecvError::Empty) => glib::ControlFlow::Continue,
+            Err(mpsc::TryRecvError::Disconnected) => glib::ControlFlow::Break,
+        }
+    });
 }
 
 fn wire_command_bar(
