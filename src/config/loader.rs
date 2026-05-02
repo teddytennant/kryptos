@@ -91,4 +91,25 @@ mod tests {
         let err = load(&p).unwrap_err();
         assert!(matches!(err, Error::TomlParse(_)));
     }
+
+    #[test]
+    fn default_path_uses_kryptos_not_sigvim() {
+        // Regression guard: the project was renamed sigvim → kryptos. If
+        // ProjectDirs is ever fed the wrong slug the user's existing config
+        // silently disappears at upgrade time. Lock the path segment in.
+        let p = default_path().expect("default_path resolves");
+        let s = p.to_string_lossy();
+        assert!(
+            s.contains("kryptos"),
+            "default config path must contain 'kryptos', got {s}"
+        );
+        assert!(
+            !s.contains("sigvim"),
+            "default config path must not reference legacy 'sigvim', got {s}"
+        );
+        assert!(
+            s.ends_with("config.toml"),
+            "default config path must end with config.toml, got {s}"
+        );
+    }
 }
