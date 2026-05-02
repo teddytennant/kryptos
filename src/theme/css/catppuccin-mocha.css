@@ -296,3 +296,96 @@ button.suggested-action.pill:hover {
   box-shadow: none;
   border: 1px solid alpha(@kryptos_fg, 0.06);
 }
+
+/* ─── Avatar hue palette — 8 deterministic colours ────────────────── */
+
+.chat-avatar.avatar-hue-0 {
+  color: @kryptos_blue;
+  background-color: alpha(@kryptos_blue, 0.18);
+}
+.chat-avatar.avatar-hue-1 {
+  color: @kryptos_lavender;
+  background-color: alpha(@kryptos_lavender, 0.18);
+}
+.chat-avatar.avatar-hue-2 {
+  color: @kryptos_green;
+  background-color: alpha(@kryptos_green, 0.18);
+}
+.chat-avatar.avatar-hue-3 {
+  color: @kryptos_yellow;
+  background-color: alpha(@kryptos_yellow, 0.18);
+}
+.chat-avatar.avatar-hue-4 {
+  color: @kryptos_red;
+  background-color: alpha(@kryptos_red, 0.18);
+}
+.chat-avatar.avatar-hue-5 {
+  color: @kryptos_subtle;
+  background-color: alpha(@kryptos_subtle, 0.18);
+}
+.chat-avatar.avatar-hue-6 {
+  color: @kryptos_accent;
+  background-color: alpha(@kryptos_accent, 0.18);
+}
+.chat-avatar.avatar-hue-7 {
+  color: @kryptos_overlay;
+  background-color: alpha(@kryptos_overlay, 0.18);
+}
+
+/* ─── Date dividers in the message timeline ──────────────────────── */
+
+.date-divider {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: @kryptos_subtle;
+  opacity: 0.55;
+  margin: 16px 0 10px;
+}
+
+/* ─── Empty states (sidebar + messages area) ─────────────────────── */
+
+.kryptos-empty-state .empty-glyph {
+  font-size: 56px;
+  color: @kryptos_subtle;
+  opacity: 0.18;
+  margin-bottom: 12px;
+}
+.kryptos-empty-state .empty-title {
+  font-size: 14px;
+  font-weight: 500;
+  color: @kryptos_fg;
+  opacity: 0.75;
+}
+.kryptos-empty-state .empty-subtitle {
+  font-size: 11px;
+  color: @kryptos_subtle;
+  opacity: 0.55;
+  letter-spacing: 0.02em;
+}
+
+/* ─── Composer placeholder + signature mode stripe ───────────────── */
+
+.kryptos-composer-placeholder {
+  color: @kryptos_subtle;
+  opacity: 0.45;
+  font-size: 13px;
+}
+
+/* ─── Linker square primary action — replaces the pill ───────────── */
+
+button.suggested-action.kryptos-linker-generate {
+  background-color: @kryptos_accent;
+  color: @kryptos_mantle;
+  border-color: alpha(@kryptos_accent, 0.55);
+}
+button.suggested-action.kryptos-linker-generate:hover {
+  background-color: alpha(@kryptos_accent, 0.88);
+}
+.kryptos-linker-copy {
+  color: @kryptos_subtle;
+}
+.kryptos-linker-copy:hover {
+  color: @kryptos_fg;
+}
