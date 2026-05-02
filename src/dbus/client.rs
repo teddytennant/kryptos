@@ -137,7 +137,7 @@ impl SignalClient {
 /// signal-cli encodes E.164 numbers in the object path by stripping
 /// the leading `+` (and any formatting) and prefixing with `_`.
 fn account_object_path(account: &str) -> String {
-    let digits: String = account.chars().filter(|c| c.is_ascii_digit()).collect();
+    let digits: String = account.chars().filter(char::is_ascii_digit).collect();
     format!("/org/asamk/Signal/_{digits}")
 }
 
@@ -147,7 +147,7 @@ fn account_object_path(account: &str) -> String {
 fn account_from_object_path(path: &str) -> Option<String> {
     let leaf = path.rsplit('/').next()?;
     let body = leaf.strip_prefix('_').unwrap_or(leaf);
-    let digits: String = body.chars().filter(|c| c.is_ascii_digit()).collect();
+    let digits: String = body.chars().filter(char::is_ascii_digit).collect();
     if digits.is_empty() {
         return None;
     }
@@ -171,7 +171,7 @@ pub(crate) fn validate_phone_number(s: &str) -> Result<()> {
 
 fn validate_verify_code(s: &str) -> Result<()> {
     // Signal codes are formatted "123-456" but signal-cli accepts either form.
-    let stripped: String = s.chars().filter(|c| c.is_ascii_digit()).collect();
+    let stripped: String = s.chars().filter(char::is_ascii_digit).collect();
     if stripped.len() != 6 {
         return Err(Error::Config(format!(
             "invalid verification code {s:?}: expected 6 digits"
@@ -356,5 +356,30 @@ mod tests {
         assert!(validate_group_id(&[]).is_err());
         assert!(validate_group_id(&[0u8]).is_ok());
         assert!(validate_group_id(&[1u8, 2, 3, 4]).is_ok());
+    }
+
+    #[test]
+    fn attachment_path_rejects_nonexistent() {
+        let bogus = Path::new("/this/path/should/not/exist/kryptos-test.bin");
+        let err = validate_attachment_path(bogus).unwrap_err();
+        assert!(matches!(err, Error::Config(_)));
+    }
+
+    #[test]
+    fn attachment_path_accepts_existing_readable_file() {
+        let tmp = tempfile::tempdir().unwrap();
+        let p = tmp.path().join("note.txt");
+        std::fs::write(&p, b"hi").unwrap();
+        validate_attachment_path(&p).expect("readable regular file is accepted");
+    }
+
+    #[test]
+    fn attachment_path_rejects_directory() {
+        let tmp = tempfile::tempdir().unwrap();
+        let err = validate_attachment_path(tmp.path()).unwrap_err();
+        match err {
+            Error::Config(msg) => assert!(msg.contains("not a regular file")),
+            other => panic!("expected Error::Config for dir, got {other:?}"),
+        }
     }
 }
