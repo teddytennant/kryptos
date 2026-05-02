@@ -19,6 +19,7 @@ use adw::prelude::*;
 
 use crate::config::Config;
 
+use super::settings::Settings;
 use super::statusline::{CommandBar, ModeLine};
 
 /// Pieces of the window the rest of the UI layer needs to talk to.
@@ -43,7 +44,7 @@ const PLACEHOLDER_MESSAGES: &[(bool, &str)] = &[
 pub fn build(app: &adw::Application, cfg: &Config) -> WindowParts {
     let sidebar_list = build_sidebar_list();
     let sidebar = build_sidebar(&sidebar_list);
-    let (content, content_title, composer) = build_content();
+    let (content, content_title, composer, prefs_button) = build_content();
 
     let split = adw::OverlaySplitView::builder()
         .sidebar(&sidebar)
@@ -76,6 +77,9 @@ pub fn build(app: &adw::Application, cfg: &Config) -> WindowParts {
     if cfg.general.start_maximized {
         window.set_maximized(true);
     }
+
+    let win_for_prefs = window.clone();
+    prefs_button.connect_clicked(move |_| Settings::open(&win_for_prefs));
 
     install_styles();
 
@@ -159,9 +163,14 @@ fn build_sidebar(list: &gtk::ListBox) -> gtk::Widget {
     toolbar.upcast::<gtk::Widget>()
 }
 
-fn build_content() -> (gtk::Widget, adw::WindowTitle, gtk::TextView) {
+fn build_content() -> (gtk::Widget, adw::WindowTitle, gtk::TextView, gtk::Button) {
     let title = adw::WindowTitle::new(PLACEHOLDER_CHATS[0], "");
     let header = adw::HeaderBar::builder().title_widget(&title).build();
+
+    let prefs_button = gtk::Button::from_icon_name("open-menu-symbolic");
+    prefs_button.set_tooltip_text(Some("Preferences"));
+    prefs_button.add_css_class("flat");
+    header.pack_end(&prefs_button);
 
     let messages_box = gtk::Box::builder()
         .orientation(gtk::Orientation::Vertical)
@@ -207,7 +216,7 @@ fn build_content() -> (gtk::Widget, adw::WindowTitle, gtk::TextView) {
     let toolbar = adw::ToolbarView::new();
     toolbar.add_top_bar(&header);
     toolbar.set_content(Some(&body));
-    (toolbar.upcast::<gtk::Widget>(), title, composer)
+    (toolbar.upcast::<gtk::Widget>(), title, composer, prefs_button)
 }
 
 fn message_bubble(mine: bool, body: &str) -> gtk::Widget {
