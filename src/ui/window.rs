@@ -211,6 +211,7 @@ fn build_sidebar_search() -> gtk::SearchEntry {
 fn build_sidebar(list: &gtk::ListBox, search: &gtk::SearchEntry) -> gtk::Widget {
     let title = adw::WindowTitle::new("Chats", "");
     let header = adw::HeaderBar::builder().title_widget(&title).build();
+    header.add_css_class("flat");
     header.add_css_class("sidebar-header");
 
     let compose_btn = gtk::Button::from_icon_name("list-add-symbolic");
@@ -239,42 +240,32 @@ fn build_sidebar(list: &gtk::ListBox, search: &gtk::SearchEntry) -> gtk::Widget 
 }
 
 fn build_content() -> (gtk::Widget, adw::WindowTitle, Composer, gtk::Button, gtk::Button) {
-    let title = adw::WindowTitle::new(PLACEHOLDER_CHATS[0].0, "online");
+    let title = adw::WindowTitle::new(PLACEHOLDER_CHATS[0].0, "");
     let header = adw::HeaderBar::builder().title_widget(&title).build();
-
-    let info_button = gtk::Button::from_icon_name("dialog-information-symbolic");
-    info_button.set_tooltip_text(Some("Conversation info"));
-    info_button.add_css_class("flat");
+    header.add_css_class("flat");
 
     let prefs_button = gtk::Button::from_icon_name("open-menu-symbolic");
     prefs_button.set_tooltip_text(Some("Preferences"));
     prefs_button.add_css_class("flat");
 
-    header.pack_end(&prefs_button);
-    header.pack_end(&info_button);
-
-    // "Link new device" lives in the header so users can re-enter the
-    // onboarding flow at any time (e.g. after wiping the signal-cli
-    // state, or from a fresh install).
     let link_button = gtk::Button::from_icon_name("phone-symbolic");
     link_button.set_tooltip_text(Some("Link new device"));
     link_button.add_css_class("flat");
+
+    header.pack_end(&prefs_button);
     header.pack_end(&link_button);
 
     let messages_box = gtk::Box::builder()
         .orientation(gtk::Orientation::Vertical)
         .spacing(2)
         .build();
-    messages_box.set_margin_start(16);
-    messages_box.set_margin_end(16);
-    messages_box.set_margin_top(16);
-    messages_box.set_margin_bottom(16);
+    messages_box.set_margin_start(28);
+    messages_box.set_margin_end(28);
+    messages_box.set_margin_top(20);
+    messages_box.set_margin_bottom(8);
 
-    let mut prev_mine: Option<bool> = None;
     for (mine, body, ts) in PLACEHOLDER_MESSAGES {
-        let show_sender = prev_mine != Some(*mine);
-        messages_box.append(&message_row(*mine, body, ts, show_sender));
-        prev_mine = Some(*mine);
+        messages_box.append(&message_row(*mine, body, ts));
     }
 
     let messages_scroll = gtk::ScrolledWindow::builder()
@@ -289,6 +280,10 @@ fn build_content() -> (gtk::Widget, adw::WindowTitle, Composer, gtk::Button, gtk
     let composer_frame = gtk::Frame::new(None);
     composer_frame.set_child(Some(composer.widget()));
     composer_frame.add_css_class("composer-frame");
+    composer_frame.set_margin_start(20);
+    composer_frame.set_margin_end(20);
+    composer_frame.set_margin_top(8);
+    composer_frame.set_margin_bottom(16);
 
     let body = gtk::Box::builder()
         .orientation(gtk::Orientation::Vertical)
@@ -302,11 +297,10 @@ fn build_content() -> (gtk::Widget, adw::WindowTitle, Composer, gtk::Button, gtk
     (toolbar.upcast::<gtk::Widget>(), title, composer, prefs_button, link_button)
 }
 
-/// One vertical message slot: optional sender label, the bubble itself,
-/// and a timestamp that fades in on hover. The whole stack sits in a
-/// `.message-row` container so the timestamp's hover transition can be
-/// driven by the row, not the bubble.
-fn message_row(mine: bool, body: &str, timestamp: &str, show_sender: bool) -> gtk::Widget {
+/// One message bubble in a row. Real chat apps don't shout "THEM" /
+/// "YOU" before every message — alignment + bubble color carry the
+/// authorship; the timestamp surfaces only on hover via CSS.
+fn message_row(mine: bool, body: &str, timestamp: &str) -> gtk::Widget {
     let label = gtk::Label::builder()
         .label(body)
         .wrap(true)
@@ -315,44 +309,15 @@ fn message_row(mine: bool, body: &str, timestamp: &str, show_sender: bool) -> gt
         .build();
     label.add_css_class("bubble");
     label.add_css_class(if mine { "bubble-mine" } else { "bubble-theirs" });
+    label.set_tooltip_text(Some(timestamp));
 
-    let bubble_align = gtk::Box::builder()
+    let row = gtk::Box::builder()
         .orientation(gtk::Orientation::Horizontal)
         .build();
-    bubble_align.set_halign(if mine { gtk::Align::End } else { gtk::Align::Start });
-    bubble_align.append(&label);
-
-    let column = gtk::Box::builder()
-        .orientation(gtk::Orientation::Vertical)
-        .spacing(0)
-        .build();
-    column.add_css_class("message-row");
-    if mine {
-        column.add_css_class("mine");
-        column.set_halign(gtk::Align::End);
-    } else {
-        column.add_css_class("theirs");
-        column.set_halign(gtk::Align::Start);
-    }
-
-    if show_sender {
-        let sender = gtk::Label::builder()
-            .label(if mine { "You" } else { "Them" })
-            .xalign(if mine { 1.0 } else { 0.0 })
-            .build();
-        sender.add_css_class("message-sender");
-        column.append(&sender);
-    }
-    column.append(&bubble_align);
-
-    let ts = gtk::Label::builder()
-        .label(timestamp)
-        .xalign(if mine { 1.0 } else { 0.0 })
-        .build();
-    ts.add_css_class("message-timestamp");
-    column.append(&ts);
-
-    column.upcast::<gtk::Widget>()
+    row.add_css_class("message-row");
+    row.set_halign(if mine { gtk::Align::End } else { gtk::Align::Start });
+    row.append(&label);
+    row.upcast::<gtk::Widget>()
 }
 
 /// Inject a small in-process stylesheet so the mode line + bubbles get
@@ -369,33 +334,25 @@ fn install_styles() {
     }
 }
 
-/// Embedded fallback stylesheet. Used until/unless the theme system mounts
-/// a palette `CssProvider` (which currently isn't wired into `activate()`),
-/// so this string carries the same design polish the palette CSS does — it
-/// just leans on libadwaita's `@accent_*` / `@card_*` tokens instead of
-/// `@kryptos_*`. Runtime overrides from a palette will win.
+/// Functional layer of styles. Visual tokens (colours, accents) come
+/// from the active palette CSS in `src/theme/css/`; this layer just
+/// sets sizes, paddings, weights, and transitions that don't depend
+/// on the palette.
 const STYLES: &str = r#"
-/* Mode line */
-.mode-line-row,
+/* Modeline */
 .kryptos-modeline {
-    background-color: @sidebar_bg_color;
-    border-top: 1px solid @borders;
-    min-height: 24px;
-    padding: 0;
-}
-.modeline-section {
+    border-top: 1px solid alpha(currentColor, 0.08);
+    min-height: 26px;
     font-family: "JetBrains Mono", "Fira Code", monospace;
     font-size: 12px;
-    padding: 4px 12px;
 }
+.modeline-section { padding: 4px 14px; }
 .modeline-section.left { padding: 0; }
-.modeline-section.center { opacity: 0.85; }
-.modeline-section.right { opacity: 0.7; font-feature-settings: "tnum" 1; }
+.modeline-section.center { opacity: 0.7; }
+.modeline-section.right { opacity: 0.55; font-feature-settings: "tnum" 1; padding-right: 14px; }
 .modeline-mode-block {
-    font-family: "JetBrains Mono", "Fira Code", monospace;
-    font-size: 12px;
     font-weight: 700;
-    letter-spacing: 0.10em;
+    letter-spacing: 0.12em;
     text-transform: uppercase;
     padding: 4px 14px;
     background-color: @accent_bg_color;
@@ -405,137 +362,72 @@ const STYLES: &str = r#"
 .modeline-mode-block.mode-insert { background-color: #a6e3a1; color: #1e1e2e; }
 .modeline-mode-block.mode-command { background-color: #f9e2af; color: #1e1e2e; }
 .modeline-mode-block.mode-search  { background-color: #f38ba8; color: #1e1e2e; }
-.modeline-separator { opacity: 0.35; padding: 0 6px; }
 
 /* Command bar */
 .command-bar {
-    padding: 6px 12px;
+    padding: 8px 16px;
     font-family: "JetBrains Mono", "Fira Code", monospace;
-    border-top: 1px solid @borders;
-    background-color: @sidebar_bg_color;
+    border-top: 1px solid alpha(currentColor, 0.08);
 }
-.command-bar-prefix {
-    font-family: "JetBrains Mono", "Fira Code", monospace;
-    font-weight: 700;
-    padding-right: 4px;
-    color: @accent_color;
-}
+.command-bar-prefix { font-weight: 700; padding-right: 6px; opacity: 0.6; }
 
-/* Sidebar search */
-.sidebar-search {
-    border-radius: 8px;
-    margin: 6px 10px 8px;
-    transition: border-color 120ms ease-out;
-}
-.sidebar-search:focus-within {
-    outline: none;
-    border-color: @accent_color;
-}
-
-/* Chat row */
-.kryptos-chat-row {
-    padding: 12px 16px;
-    transition: background-color 120ms ease-out;
-}
+/* Sidebar search + chat row */
+.sidebar-search { margin: 8px 12px 4px; border-radius: 10px; }
+.kryptos-chat-row { padding: 12px 14px; transition: background-color 120ms ease-out; }
 .kryptos-chat-row .chat-avatar {
-    min-width: 36px;
-    min-height: 36px;
-    border-radius: 18px;
+    min-width: 36px; min-height: 36px; border-radius: 18px;
     background-color: alpha(@accent_color, 0.22);
     color: @accent_color;
-    font-size: 13px;
-    font-weight: 700;
+    font-size: 13px; font-weight: 700;
 }
 .kryptos-chat-row .chat-name { font-size: 14px; font-weight: 600; }
-.kryptos-chat-row .chat-preview { font-size: 12px; opacity: 0.7; }
+.kryptos-chat-row .chat-preview { font-size: 12px; opacity: 0.62; }
 .kryptos-chat-row .chat-timestamp {
-    font-size: 11px; font-weight: 500; opacity: 0.55;
+    font-size: 11px; font-weight: 500; opacity: 0.5;
     font-feature-settings: "tnum" 1;
 }
-.kryptos-chat-row:selected .chat-avatar {
-    background-color: alpha(@accent_color, 0.34);
-}
 
-/* Header presence subtitle */
-.chat-presence { font-size: 11px; font-weight: 500; opacity: 0.6; }
+/* Header chrome — flat & quiet, the chat content is the story */
+headerbar.flat { background: transparent; box-shadow: none; border: none; min-height: 44px; }
+headerbar windowtitle { font-weight: 600; font-size: 14px; }
+headerbar button.flat { border-radius: 999px; min-width: 30px; min-height: 30px; padding: 4px; }
+
+/* Sidebar header gets a subtle separator from content */
+.sidebar-header { border-bottom: 1px solid alpha(currentColor, 0.06); }
 
 /* Messages */
-.message-row { margin: 2px 0; }
-.message-sender {
-    font-size: 11px; font-weight: 600; letter-spacing: 0.04em;
-    text-transform: uppercase; opacity: 0.55; margin: 4px 4px 2px;
-}
-.message-row.mine .message-sender { color: @accent_color; }
-.message-timestamp {
-    font-size: 11px; font-weight: 500; opacity: 0;
-    margin: 2px 4px 0; font-feature-settings: "tnum" 1;
-    transition: opacity 150ms ease-out;
-}
-.message-row:hover .message-timestamp { opacity: 0.6; }
-
+.message-row { margin: 3px 0; }
 .bubble {
     padding: 9px 14px;
-    border-radius: 16px;
-    box-shadow: 0 1px 2px rgba(0,0,0,0.10);
-    transition: box-shadow 150ms ease-out;
+    border-radius: 18px;
+    font-size: 14px;
+    line-height: 1.4;
 }
 .bubble-mine {
-    background-color: alpha(@accent_bg_color, 0.92);
+    background-color: @accent_bg_color;
     color: @accent_fg_color;
+    border-bottom-right-radius: 6px;
 }
 .bubble-theirs {
-    background-color: alpha(@card_shade_color, 1.0);
+    background-color: alpha(currentColor, 0.08);
+    border-bottom-left-radius: 6px;
 }
 
 /* Composer */
 .composer-frame {
-    border-radius: 12px;
-    margin: 8px 12px 12px;
-    border: 1px solid alpha(@borders, 0.8);
-    background-color: alpha(@card_bg_color, 0.6);
+    border-radius: 14px;
+    border: 1px solid alpha(currentColor, 0.10);
+    background-color: alpha(currentColor, 0.03);
     transition: border-color 150ms ease-out, box-shadow 150ms ease-out;
 }
 .composer-frame:focus-within {
     border-color: @accent_color;
-    box-shadow: 0 0 0 3px alpha(@accent_color, 0.18);
+    box-shadow: 0 0 0 3px alpha(@accent_color, 0.16);
 }
-.kryptos-composer, .composer-frame textview { background-color: transparent; }
-
-.composer-mode-badge {
-    font-family: "JetBrains Mono", "Fira Code", monospace;
-    font-size: 10px;
-    font-weight: 700;
-    letter-spacing: 0.10em;
-    text-transform: uppercase;
-    padding: 2px 8px 2px 6px;
-    border-radius: 999px;
-    background-color: alpha(@accent_color, 0.18);
-    color: @accent_color;
-}
-.composer-insert .composer-mode-badge {
-    background-color: alpha(#a6e3a1, 0.20);
-    color: #a6e3a1;
-}
-.composer-visual .composer-mode-badge {
-    background-color: alpha(#f9e2af, 0.20);
-    color: #f9e2af;
-}
-.composer-mode-dot { font-size: 12px; margin-right: 4px; opacity: 0.85; }
-
+.kryptos-composer, .composer-frame textview { background-color: transparent; font-size: 14px; }
 .kryptos-composer-wrapper.composer-normal { caret-color: alpha(@accent_color, 0.85); }
 .kryptos-composer-wrapper.composer-insert { caret-color: @accent_color; }
 .kryptos-composer-wrapper.composer-visual { caret-color: #f9e2af; }
-
-/* Empty state */
-.empty-state { padding: 32px 24px; }
-.empty-state-glyph { font-size: 64px; opacity: 0.18; color: @accent_color; }
-.empty-state-title { font-size: 15px; font-weight: 600; opacity: 0.7; }
-.empty-state-subtitle { font-size: 12px; opacity: 0.7; }
-
-headerbar button.flat {
-    border-radius: 999px;
-    transition: background-color 120ms ease-out;
-}
 "#;
 
 /// Helper: select the row N positions from the current selection in

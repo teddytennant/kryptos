@@ -90,41 +90,19 @@ impl Composer {
     pub fn new() -> Self {
         let text_view = gtk::TextView::builder()
             .wrap_mode(gtk::WrapMode::WordChar)
-            .top_margin(8)
-            .bottom_margin(8)
-            .left_margin(12)
-            .right_margin(12)
+            .top_margin(10)
+            .bottom_margin(10)
+            .left_margin(14)
+            .right_margin(14)
             .build();
         text_view.add_css_class("kryptos-composer");
         text_view.buffer().set_enable_undo(true);
 
-        // Pill-shaped mode badge with a leading dot indicator. The dot
-        // is its own label so CSS can colour and animate it independently
-        // of the badge text.
-        let mode_dot = gtk::Label::builder().label("\u{2022}").build();
-        mode_dot.add_css_class("composer-mode-dot");
-
-        let mode_text = gtk::Label::builder()
-            .label(ComposerMode::Normal.label())
-            .xalign(0.0)
-            .build();
-
-        let mode_badge = gtk::Box::builder()
-            .orientation(gtk::Orientation::Horizontal)
-            .spacing(0)
-            .build();
-        mode_badge.add_css_class("composer-mode-badge");
-        mode_badge.append(&mode_dot);
-        mode_badge.append(&mode_text);
-
-        let badge_row = gtk::Box::builder()
-            .orientation(gtk::Orientation::Horizontal)
-            .spacing(0)
-            .build();
-        badge_row.append(&mode_badge);
-        badge_row.set_margin_start(10);
-        badge_row.set_margin_top(6);
-        badge_row.set_margin_bottom(2);
+        // The mode is shown in the bottom modeline, not on the composer.
+        // We keep an off-screen label so the public API surface and tests
+        // don't change.
+        let mode_text = gtk::Label::new(Some(ComposerMode::Normal.label()));
+        mode_text.set_visible(false);
 
         let wrapper = gtk::Box::builder()
             .orientation(gtk::Orientation::Vertical)
@@ -132,7 +110,6 @@ impl Composer {
             .build();
         wrapper.add_css_class("kryptos-composer-wrapper");
         wrapper.add_css_class(ComposerMode::Normal.css_class());
-        wrapper.append(&badge_row);
         wrapper.append(&text_view);
 
         let composer = Self {

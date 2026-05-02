@@ -65,18 +65,18 @@ impl ModeLine {
         center.add_css_class("center");
         center.append(&center_label);
 
-        // Right: pending vim keys, separator, account index.
+        // Right: pending vim keys (e.g. half-typed `d`, `gg`). Account
+        // info is intentionally absent until we have something
+        // meaningful to show (a real account is linked, or unread totals).
         let pending_label = gtk::Label::builder().label("").build();
-        let separator = gtk::Label::builder().label("\u{258F}").build(); // ▏
-        separator.add_css_class("modeline-separator");
-        let account_label = gtk::Label::builder().label("acc 1").build();
+        let account_label = gtk::Label::builder().label("").build();
+        account_label.set_visible(false);
         let right = gtk::Box::builder()
             .orientation(gtk::Orientation::Horizontal)
             .build();
         right.add_css_class("modeline-section");
         right.add_css_class("right");
         right.append(&pending_label);
-        right.append(&separator);
         right.append(&account_label);
 
         let container = gtk::Box::builder()
