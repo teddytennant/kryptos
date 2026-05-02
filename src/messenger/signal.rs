@@ -43,6 +43,35 @@ impl SignalBackend {
         }
     }
 
+    /// Resolve the account from `(configured, available)`:
+    ///
+    /// - non-empty `configured` → use it verbatim.
+    /// - empty + `available` has exactly one entry → use that.
+    /// - empty + `available` has many → log + pick the first; the user
+    ///   is expected to set `[backends.signal] account = "+…"` to
+    ///   disambiguate.
+    /// - empty + `available` is empty → return `None` (no signed-in
+    ///   account; backend can't be built).
+    ///
+    /// Pure function so the resolver is unit-testable without a live
+    /// signal-cli connection.
+    pub fn resolve_account(configured: &str, available: &[String]) -> Option<String> {
+        if !configured.is_empty() {
+            return Some(configured.to_string());
+        }
+        match available.len() {
+            0 => None,
+            1 => Some(available[0].clone()),
+            _ => {
+                warn!(
+                    accounts = ?available,
+                    "multiple signal-cli accounts present and `[backends.signal] account` is empty; picking first"
+                );
+                Some(available[0].clone())
+            }
+        }
+    }
+
     pub fn account(&self) -> &str {
         &self.account
     }
@@ -171,6 +200,10 @@ impl MessengerBackend for SignalBackend {
             }
         });
         Ok(rx)
+    }
+
+    fn self_account(&self) -> Option<&str> {
+        Some(&self.account)
     }
 }
 
@@ -313,6 +346,31 @@ mod tests {
         assert_eq!(msg.attachments.len(), 2);
         assert_eq!(msg.attachments[0].local_path, msg.attachments[1].local_path);
         assert_eq!(msg.attachments[0].file_name, msg.attachments[1].file_name);
+    }
+
+    #[test]
+    fn self_account_resolves_from_config_or_first_listed() {
+        // 1. explicit account in config → returned verbatim.
+        let resolved = SignalBackend::resolve_account("+14155552671", &[]);
+        assert_eq!(resolved.as_deref(), Some("+14155552671"));
+
+        // 2. empty config + exactly one listed → that one.
+        let resolved = SignalBackend::resolve_account("", &["+14155552672".into()]);
+        assert_eq!(resolved.as_deref(), Some("+14155552672"));
+
+        // 3. empty config + zero listed → None (no account at all).
+        let resolved = SignalBackend::resolve_account("", &[]);
+        assert_eq!(resolved, None);
+
+        // 4. empty config + multiple listed → first entry (with a warn).
+        let resolved =
+            SignalBackend::resolve_account("", &["+14155552673".into(), "+14155552674".into()]);
+        assert_eq!(resolved.as_deref(), Some("+14155552673"));
+
+        // 5. explicit beats listed even when listed has a different value.
+        let resolved =
+            SignalBackend::resolve_account("+14155552675", &["+14155552676".into()]);
+        assert_eq!(resolved.as_deref(), Some("+14155552675"));
     }
 
     #[test]

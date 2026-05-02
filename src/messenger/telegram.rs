@@ -24,7 +24,7 @@
 //! [`MessengerHub`]: crate::messenger::MessengerHub
 
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
+use std::sync::{Arc, OnceLock};
 
 use async_trait::async_trait;
 use grammers_client::session::{PackedChat, Session};
@@ -84,6 +84,10 @@ pub struct TelegramBackend {
     bus: broadcast::Sender<Event>,
     forwarder_started: Mutex<bool>,
     login: Arc<Mutex<LoginState>>,
+    /// Cached own user_id (decimal string) populated after a successful
+    /// authorisation check. `OnceLock` so `self_account()` stays a
+    /// non-async `&str`-returning method on the trait.
+    self_id: OnceLock<String>,
 }
 
 impl TelegramBackend {
@@ -112,12 +116,25 @@ impl TelegramBackend {
             bus,
             forwarder_started: Mutex::new(false),
             login: Arc::new(Mutex::new(LoginState::default())),
+            self_id: OnceLock::new(),
         })
     }
 
-    /// `true` if the persisted session is already signed in.
+    /// `true` if the persisted session is already signed in. Hits the
+    /// network the first time we observe an authorised session to cache
+    /// the local user_id so [`Self::self_account`] can return it
+    /// synchronously later.
     pub async fn is_authorized(&self) -> bool {
-        self.client.is_authorized().await.unwrap_or(false)
+        let ok = self.client.is_authorized().await.unwrap_or(false);
+        if ok && self.self_id.get().is_none() {
+            match self.client.get_me().await {
+                Ok(user) => {
+                    let _ = self.self_id.set(user.id().to_string());
+                }
+                Err(e) => debug!(error = %e, "telegram get_me after authorized check failed"),
+            }
+        }
+        ok
     }
 
     /// Step 1 of login. Asks Telegram to deliver a code to `phone`
@@ -149,9 +166,10 @@ impl TelegramBackend {
             .as_ref()
             .ok_or_else(|| Error::Telegram("submit_code called before request_login".into()))?;
         match self.client.sign_in(token, code).await {
-            Ok(_user) => {
+            Ok(user) => {
                 st.token = None;
                 st.password_token = None;
+                let _ = self.self_id.set(user.id().to_string());
                 Ok(NeedsPassword(false))
             }
             Err(SignInError::PasswordRequired(pwd_token)) => {
@@ -178,9 +196,10 @@ impl TelegramBackend {
             })?
         };
         match self.client.check_password(pwd_token, password).await {
-            Ok(_user) => {
+            Ok(user) => {
                 let mut st = self.login.lock().await;
                 st.password_token = None;
+                let _ = self.self_id.set(user.id().to_string());
                 Ok(())
             }
             Err(SignInError::InvalidPassword) => Err(Error::Telegram("invalid password".into())),
@@ -364,6 +383,10 @@ impl MessengerBackend for TelegramBackend {
             }
         });
         Ok(rx)
+    }
+
+    fn self_account(&self) -> Option<&str> {
+        self.self_id.get().map(String::as_str)
     }
 }
 

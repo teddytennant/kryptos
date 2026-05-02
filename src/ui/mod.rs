@@ -34,9 +34,10 @@ use crate::config::{loader, Config};
 use crate::core::Result;
 use crate::dbus::SignalClient;
 use crate::messenger::{
-    signal::SignalBackend, telegram::TelegramBackend, ChatId, ConversationSummary,
+    signal::SignalBackend, telegram::TelegramBackend, Backend, ChatId, ConversationSummary,
     Event as MEvent, MessengerHub, NormalizedMessage,
 };
+use std::collections::HashMap;
 use crate::theme::ThemeManager;
 use crate::vim::{Engine, KeySym, KeymapSet, Mode, Outcome};
 
@@ -90,7 +91,7 @@ impl AsyncCtx {
 
         let mut hub = MessengerHub::new();
         if cfg.backends.signal.enabled {
-            match runtime.block_on(build_signal_backend()) {
+            match runtime.block_on(build_signal_backend(&cfg.backends.signal.account)) {
                 Ok(Some(backend)) => hub.add(backend),
                 Ok(None) => debug!("no Signal account configured; backend not added"),
                 Err(e) => warn!(error = %e, "signal backend init failed"),
@@ -128,8 +129,6 @@ async fn build_telegram_backend(
     cfg: &crate::config::schema::TelegramBackendConfig,
 ) -> Result<Option<Arc<TelegramBackend>>> {
     if cfg.api_id == 0 || cfg.api_hash.is_empty() {
-        // Login never happened; leave the backend off and let the user
-        // run `:telegram-login`. We do *not* persist anything here.
         return Ok(None);
     }
     let session_path = crate::messenger::telegram::resolve_session_path(&cfg.session_path);
@@ -141,7 +140,7 @@ async fn build_telegram_backend(
     Ok(Some(Arc::new(backend)))
 }
 
-async fn build_signal_backend() -> Result<Option<Arc<SignalBackend>>> {
+async fn build_signal_backend(configured_account: &str) -> Result<Option<Arc<SignalBackend>>> {
     let client = match SignalClient::connect().await {
         Ok(c) => c,
         Err(e) => {
@@ -153,8 +152,8 @@ async fn build_signal_backend() -> Result<Option<Arc<SignalBackend>>> {
         warn!(error = %e, "signal-cli daemon unreachable; signal disabled");
         return Ok(None);
     }
-    let accounts = client.list_accounts().await.unwrap_or_default();
-    let account = match accounts.into_iter().next() {
+    let available = client.list_accounts().await.unwrap_or_default();
+    let account = match SignalBackend::resolve_account(configured_account, &available) {
         Some(a) => a,
         None => {
             debug!("signal-cli has no accounts yet; backend will spin up after link");
@@ -220,11 +219,33 @@ fn activate(app: &adw::Application) {
     // the GTK thread and cloned into worker callbacks as needed.
     let active_chat: Rc<RefCell<Option<ChatId>>> = Rc::new(RefCell::new(None));
 
+    // Per-backend "this is me" identifier — populated on startup once
+    // backends are attached so `is_mine` doesn't have to ask the hub on
+    // every render. Telegram entries land here only after a successful
+    // login (the cache is keyed off `is_authorized`).
+    let self_accounts: Rc<RefCell<HashMap<Backend, String>>> =
+        Rc::new(RefCell::new(HashMap::new()));
+
     if let Some(ctx) = async_ctx.as_ref() {
+        for backend in [Backend::Signal, Backend::Telegram] {
+            if let Some(id) = ctx.hub.self_account_for(backend) {
+                self_accounts.borrow_mut().insert(backend, id);
+            }
+        }
         prime_sidebar_from_cache(ctx.clone(), &parts);
         spawn_remote_refresh(ctx.clone(), &parts);
-        spawn_event_subscription(ctx.clone(), &parts, active_chat.clone());
-        wire_sidebar_selection(ctx.clone(), &parts, active_chat.clone());
+        spawn_event_subscription(
+            ctx.clone(),
+            &parts,
+            active_chat.clone(),
+            self_accounts.clone(),
+        );
+        wire_sidebar_selection(
+            ctx.clone(),
+            &parts,
+            active_chat.clone(),
+            self_accounts.clone(),
+        );
     }
 
     wire_composer_send(
@@ -232,6 +253,7 @@ fn activate(app: &adw::Application) {
         &parts,
         active_chat.clone(),
         engine.clone(),
+        self_accounts.clone(),
     );
 
     wire_command_bar(&parts, &dispatcher, engine.clone());
@@ -334,6 +356,7 @@ fn spawn_event_subscription(
     ctx: Arc<AsyncCtx>,
     parts: &WindowParts,
     active_chat: Rc<RefCell<Option<ChatId>>>,
+    self_accounts: Rc<RefCell<HashMap<Backend, String>>>,
 ) {
     let hub = ctx.hub.clone();
     let cache = ctx.cache.clone();
@@ -390,7 +413,11 @@ fn spawn_event_subscription(
                     // If the message belongs to the active chat, append
                     // it to the visible message box too.
                     if active_chat.borrow().as_ref() == Some(&msg.id) {
-                        append_message_widget(&messages_box, &msg);
+                        let own_id = self_accounts
+                            .borrow()
+                            .get(&msg.id.backend)
+                            .cloned();
+                        append_message_widget(&messages_box, &msg, own_id.as_deref());
                     }
                     let _ = &content_title;
                 }
@@ -455,6 +482,7 @@ fn wire_sidebar_selection(
     ctx: Arc<AsyncCtx>,
     parts: &WindowParts,
     active_chat: Rc<RefCell<Option<ChatId>>>,
+    self_accounts: Rc<RefCell<HashMap<Backend, String>>>,
 ) {
     let sidebar_index = parts.sidebar_index.clone();
     let messages_box = parts.messages_box.clone();
@@ -477,6 +505,8 @@ fn wire_sidebar_selection(
         *active_chat.borrow_mut() = Some(id.clone());
         content_title.set_title(&id.native);
 
+        let own_id = self_accounts.borrow().get(&id.backend).cloned();
+
         // Cache-first read.
         let cache_msgs = ctx
             .runtime
@@ -485,7 +515,7 @@ fn wire_sidebar_selection(
         // Sort oldest-first; cache returns DESC.
         let mut sorted = cache_msgs.clone();
         sorted.sort_by_key(|m| m.ts);
-        rebuild_messages_box(&messages_box, &sorted, &id);
+        rebuild_messages_box(&messages_box, &sorted, &id, own_id.as_deref());
 
         // Async refresh from hub.
         let id_clone = id.clone();
@@ -524,11 +554,17 @@ fn wire_sidebar_selection(
 
         let messages_box_ui = messages_box.clone();
         let id_for_ui = id.clone();
+        let own_id_for_ui = own_id.clone();
         glib::source::timeout_add_local(Duration::from_millis(120), move || match rx.try_recv() {
             Ok(mut msgs) => {
                 if !msgs.is_empty() {
                     msgs.sort_by_key(|m| m.ts_ms);
-                    rebuild_messages_box_normalized(&messages_box_ui, &msgs, &id_for_ui);
+                    rebuild_messages_box_normalized(
+                        &messages_box_ui,
+                        &msgs,
+                        &id_for_ui,
+                        own_id_for_ui.as_deref(),
+                    );
                 }
                 glib::ControlFlow::Break
             }
@@ -546,6 +582,7 @@ fn wire_composer_send(
     parts: &WindowParts,
     active_chat: Rc<RefCell<Option<ChatId>>>,
     engine: Rc<RefCell<Engine>>,
+    self_accounts: Rc<RefCell<HashMap<Backend, String>>>,
 ) {
     let mode_line = parts.mode_line.clone();
     let messages_box = parts.messages_box.clone();
@@ -573,11 +610,17 @@ fn wire_composer_send(
             .map(|d| d.as_millis() as i64)
             .unwrap_or(0);
 
-        // Optimistic UI: append a "mine" bubble immediately.
+        // Optimistic UI: append a "mine" bubble immediately. We tag it
+        // with the resolved self-account so it round-trips through
+        // `is_mine` correctly; falling back to "me" keeps the bubble
+        // visually correct when the backend hasn't reported a self id
+        // yet (e.g. Telegram pre-login).
+        let own_id = self_accounts.borrow().get(&id.backend).cloned();
+        let optimistic_sender = own_id.clone().unwrap_or_else(|| "me".into());
         let optimistic = NormalizedMessage {
             id: id.clone(),
             ts_ms: now,
-            sender: "me".into(),
+            sender: optimistic_sender.clone(),
             body: Some(text.clone()),
             attachments: Vec::new(),
             backend_extras: match id.backend {
@@ -591,7 +634,7 @@ fn wire_composer_send(
                 }
             },
         };
-        append_message_widget(&messages_box, &optimistic);
+        append_message_widget(&messages_box, &optimistic, own_id.as_deref());
 
         if let Some(ctx) = ctx.clone() {
             let id_clone = id.clone();
@@ -608,7 +651,7 @@ fn wire_composer_send(
                                 id: 0,
                                 conversation_id: id_clone.to_wire(),
                                 ts,
-                                sender: "me".into(),
+                                sender: optimistic_sender.clone(),
                                 body: Some(body_clone),
                                 quote_ts: None,
                                 quote_sender: None,
@@ -706,7 +749,7 @@ impl WindowPartsLite {
     }
 }
 
-fn rebuild_messages_box(b: &gtk::Box, msgs: &[Message], id: &ChatId) {
+fn rebuild_messages_box(b: &gtk::Box, msgs: &[Message], id: &ChatId, own_id: Option<&str>) {
     while let Some(child) = b.first_child() {
         b.remove(&child);
     }
@@ -718,17 +761,26 @@ fn rebuild_messages_box(b: &gtk::Box, msgs: &[Message], id: &ChatId) {
         .duration_since(std::time::UNIX_EPOCH)
         .map(|d| d.as_millis() as i64)
         .unwrap_or(0);
+    let _ = id; // retained for future per-chat colouring
     let rows: Vec<(bool, String, i64)> = msgs
         .iter()
         .map(|m| {
-            let mine = m.sender == "me" || m.sender != id.native;
-            (mine, m.body.clone().unwrap_or_default(), m.ts)
+            (
+                window::is_mine(&m.sender, own_id),
+                m.body.clone().unwrap_or_default(),
+                m.ts,
+            )
         })
         .collect();
     window::populate_messages(b, &rows, now);
 }
 
-fn rebuild_messages_box_normalized(b: &gtk::Box, msgs: &[NormalizedMessage], id: &ChatId) {
+fn rebuild_messages_box_normalized(
+    b: &gtk::Box,
+    msgs: &[NormalizedMessage],
+    id: &ChatId,
+    own_id: Option<&str>,
+) {
     while let Some(child) = b.first_child() {
         b.remove(&child);
     }
@@ -740,23 +792,27 @@ fn rebuild_messages_box_normalized(b: &gtk::Box, msgs: &[NormalizedMessage], id:
         .duration_since(std::time::UNIX_EPOCH)
         .map(|d| d.as_millis() as i64)
         .unwrap_or(0);
+    let _ = id;
     let rows: Vec<(bool, String, i64)> = msgs
         .iter()
         .map(|m| {
-            let mine = m.sender == "me" || m.sender != id.native;
-            (mine, m.body.clone().unwrap_or_default(), m.ts_ms)
+            (
+                window::is_mine(&m.sender, own_id),
+                m.body.clone().unwrap_or_default(),
+                m.ts_ms,
+            )
         })
         .collect();
     window::populate_messages(b, &rows, now);
 }
 
-fn append_message_widget(messages_box: &gtk::Box, msg: &NormalizedMessage) {
+fn append_message_widget(messages_box: &gtk::Box, msg: &NormalizedMessage, own_id: Option<&str>) {
     if let Some(first) = messages_box.first_child() {
         if first.has_css_class("kryptos-empty-state") {
             messages_box.remove(&first);
         }
     }
-    let mine = msg.sender == "me" || msg.sender != msg.id.native;
+    let mine = window::is_mine(&msg.sender, own_id);
     let label = window::format_clock_label(msg.ts_ms);
     let body = msg.body.clone().unwrap_or_default();
     messages_box.append(&window::message_row(mine, &body, &label, true, true));

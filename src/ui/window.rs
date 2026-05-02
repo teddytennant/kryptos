@@ -111,8 +111,12 @@ impl WindowParts {
     /// Replace the messages view with `msgs`, ordered oldest-first.
     /// The content header title is set from `active.native` so the
     /// user always knows which chat they're looking at.
+    ///
+    /// `own_id` is the active backend's `self_account()` — the local
+    /// user's E.164 number for Signal, the user_id (decimal string)
+    /// for Telegram. When `None`, no message is treated as "mine".
     #[allow(dead_code)] // exposed for the dispatcher; used via cloned widgets in mod.rs.
-    pub fn set_messages(&self, msgs: &[NormalizedMessage], active: &ChatId) {
+    pub fn set_messages(&self, msgs: &[NormalizedMessage], active: &ChatId, own_id: Option<&str>) {
         while let Some(child) = self.messages_box.first_child() {
             self.messages_box.remove(&child);
         }
@@ -126,7 +130,13 @@ impl WindowParts {
         let now = now_ms();
         let rows: Vec<(bool, String, i64)> = msgs
             .iter()
-            .map(|m| (is_mine(m), m.body.clone().unwrap_or_default(), m.ts_ms))
+            .map(|m| {
+                (
+                    is_mine(&m.sender, own_id),
+                    m.body.clone().unwrap_or_default(),
+                    m.ts_ms,
+                )
+            })
             .collect();
         populate_messages(&self.messages_box, &rows, now);
     }
@@ -650,20 +660,16 @@ fn now_ms() -> i64 {
         .unwrap_or(0)
 }
 
-/// True if the message belongs to the local user. signal-cli marks our
-/// own outbound messages by setting `sender == self_account`; we don't
-/// have that account string here, so the convention is that the caller
-/// pre-tags ours with a synthetic `"me"` sender, or — for incoming
-/// messages — the `sender` matches one of the known self-numbers.
-///
-/// In v1 we rely on the simpler heuristic the cache already provides:
-/// the conversation id pinpoints the *other* party, so any message
-/// whose `sender` differs from the conversation native id is "mine".
-/// That's correct for one-to-ones (the only case the placeholder data
-/// covered) and is a reasonable approximation for groups until we wire
-/// the real account number through.
-fn is_mine(msg: &NormalizedMessage) -> bool {
-    msg.sender == "me" || msg.sender != msg.id.native
+/// True if the message belongs to the local user. The caller passes
+/// the active backend's own identifier (E.164 for Signal, user_id for
+/// Telegram); we match it against the message's `sender`. `None` means
+/// the backend hasn't reported its identity yet — be conservative and
+/// treat nothing as "mine" rather than guessing.
+pub(super) fn is_mine(sender: &str, own_id: Option<&str>) -> bool {
+    match own_id {
+        Some(me) => sender == me,
+        None => false,
+    }
 }
 
 /// JetBrains Mono Nerd Font as the system face. Setting `gtk-font-name`
