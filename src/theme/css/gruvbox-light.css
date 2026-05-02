@@ -42,13 +42,36 @@ listbox.navigation-sidebar > row {
   margin: 0;
 }
 
-listview row:hover {
-  background-color: alpha(@kryptos_surface, 0.6);
+/* Selection + hover - subtle, no inverted text. */
+listview row:hover,
+listbox.navigation-sidebar > row:hover,
+.kryptos-chat-row:hover {
+  background-color: alpha(@kryptos_surface, 0.5);
 }
 
-listview row:selected {
-  background-color: @kryptos_surface;
+listview row:selected,
+listbox.navigation-sidebar > row:selected,
+.kryptos-chat-row:selected {
+  background-color: @kryptos_surface2;
   color: @kryptos_fg;
+  box-shadow: inset 3px 0 0 @kryptos_accent;
+}
+
+listview row:selected:hover,
+listbox.navigation-sidebar > row:selected:hover,
+.kryptos-chat-row:selected:hover {
+  background-color: @kryptos_surface2;
+}
+
+/* Thin in-list divider, hidden on the selected row. */
+.kryptos-chat-row,
+listbox.navigation-sidebar > row {
+  border-bottom: 1px solid alpha(@kryptos_surface2, 0.45);
+}
+
+.kryptos-chat-row:selected,
+listbox.navigation-sidebar > row:selected {
+  border-bottom-color: transparent;
 }
 
 textview, textview text {
