@@ -35,7 +35,7 @@ mod tests {
     use pretty_assertions::assert_eq;
 
     fn set(items: &[&str]) -> HashSet<String> {
-        items.iter().map(|s| s.to_string()).collect()
+        items.iter().map(std::string::ToString::to_string).collect()
     }
 
     #[test]

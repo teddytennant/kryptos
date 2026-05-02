@@ -43,6 +43,7 @@ impl FromStr for KeySeq {
         while let Some(&c) = chars.peek() {
             if c == '<' {
                 let mut buf = String::new();
+                // SAFETY: peek() above returned Some, so next() must too.
                 buf.push(chars.next().unwrap());
                 let mut closed = false;
                 for ch in chars.by_ref() {
@@ -59,6 +60,7 @@ impl FromStr for KeySeq {
                 }
                 keys.push(Key::from_str(&buf)?);
             } else {
+                // SAFETY: peek() above returned Some, so next() must too.
                 let c = chars.next().unwrap();
                 keys.push(Key::char(c));
             }

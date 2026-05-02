@@ -71,7 +71,10 @@ pub struct ChatId {
 
 impl ChatId {
     pub fn new(backend: Backend, native: impl Into<String>) -> Self {
-        Self { backend, native: native.into() }
+        Self {
+            backend,
+            native: native.into(),
+        }
     }
 
     /// `signal:+14155552671` style round-trippable string.
@@ -172,12 +175,7 @@ pub trait MessengerBackend: Send + Sync {
 
     /// Send a message. Returns the timestamp the backend assigned (used
     /// downstream as the message's stable id alongside `sender`).
-    async fn send_message(
-        &self,
-        id: &ChatId,
-        body: &str,
-        attachments: &[PathBuf],
-    ) -> Result<i64>;
+    async fn send_message(&self, id: &ChatId, body: &str, attachments: &[PathBuf]) -> Result<i64>;
 
     async fn mark_read(&self, id: &ChatId) -> Result<()>;
 

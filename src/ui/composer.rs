@@ -185,8 +185,15 @@ impl Composer {
             return false;
         }
         buf.set_text("");
-        if let Some(cb) = self.on_send.borrow().as_ref() {
+        // Take the callback out of the RefCell before invoking it so the
+        // callback is free to re-enter the composer (e.g. via set_on_send
+        // on its result) without tripping a borrow conflict.
+        let cb = self.on_send.borrow_mut().take();
+        if let Some(ref cb) = cb {
             cb(text);
+        }
+        if self.on_send.borrow().is_none() {
+            *self.on_send.borrow_mut() = cb;
         }
         self.set_mode(ComposerMode::Normal);
         true

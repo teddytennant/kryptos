@@ -43,7 +43,7 @@ impl ConfigWatcher {
         // the file via rename, which doesn't fire on the path itself.
         let watch_dir = path
             .parent()
-            .map(|p| p.to_path_buf())
+            .map(std::path::Path::to_path_buf)
             .unwrap_or_else(|| PathBuf::from("."));
         watcher
             .watch(&watch_dir, RecursiveMode::NonRecursive)

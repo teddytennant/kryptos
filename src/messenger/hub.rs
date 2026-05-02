@@ -12,9 +12,7 @@ use tokio::sync::mpsc;
 use tracing::{debug, warn};
 
 use crate::core::{Error, Result};
-use crate::messenger::{
-    Backend, ChatId, ConversationSummary, Event, MessengerBackend,
-};
+use crate::messenger::{Backend, ChatId, ConversationSummary, Event, MessengerBackend};
 
 #[derive(Default)]
 pub struct MessengerHub {
@@ -64,12 +62,7 @@ impl MessengerHub {
     }
 
     /// Route a send by [`ChatId::backend`].
-    pub async fn send(
-        &self,
-        id: &ChatId,
-        body: &str,
-        attachments: &[PathBuf],
-    ) -> Result<i64> {
+    pub async fn send(&self, id: &ChatId, body: &str, attachments: &[PathBuf]) -> Result<i64> {
         self.find(id.backend)
             .ok_or_else(|| Error::Config(format!("no backend registered for {}", id.backend)))?
             .send_message(id, body, attachments)
@@ -197,7 +190,9 @@ mod tests {
     fn msg(backend: Backend, native: &str, body: &str) -> NormalizedMessage {
         let extras = match backend {
             Backend::Signal => BackendExtras::Signal { group_id: None },
-            Backend::Telegram => BackendExtras::Telegram { reply_to_msg_id: None },
+            Backend::Telegram => BackendExtras::Telegram {
+                reply_to_msg_id: None,
+            },
         };
         NormalizedMessage {
             id: ChatId::new(backend, native),
@@ -224,8 +219,16 @@ mod tests {
         tokio::task::yield_now().await;
         tokio::time::sleep(std::time::Duration::from_millis(10)).await;
 
-        a.emit(Event::MessageReceived(msg(Backend::Signal, "+1", "from-signal")));
-        b.emit(Event::MessageReceived(msg(Backend::Telegram, "9", "from-tg")));
+        a.emit(Event::MessageReceived(msg(
+            Backend::Signal,
+            "+1",
+            "from-signal",
+        )));
+        b.emit(Event::MessageReceived(msg(
+            Backend::Telegram,
+            "9",
+            "from-tg",
+        )));
 
         let mut got = Vec::new();
         for _ in 0..2 {

@@ -258,4 +258,79 @@ mod tests {
         assert_eq!(e.feed(Key::char(',')), Outcome::Pending);
         assert_eq!(e.feed(Key::char('q')), Outcome::Action(Action::Quit));
     }
+
+    #[test]
+    fn leader_can_be_a_named_key_like_space() {
+        // The default config uses `<Space>` as the leader. Make sure the
+        // round-trip through KeymapSet expansion preserves that — pressing
+        // Space then a follower fires the bound action.
+        let cfg = Config {
+            general: crate::config::schema::General {
+                leader_key: "<Space>".into(),
+                ..Default::default()
+            },
+            keymap: crate::config::schema::Keymap {
+                normal: [("<leader>q".to_string(), "quit".to_string())]
+                    .into_iter()
+                    .collect(),
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+        let set = KeymapSet::from_config(&cfg).unwrap();
+        let mut e = Engine::new(set);
+        assert_eq!(e.feed(Key::named("Space")), Outcome::Pending);
+        assert_eq!(e.feed(Key::char('q')), Outcome::Action(Action::Quit));
+    }
+
+    #[test]
+    fn leader_works_in_multi_step_sequences() {
+        // <leader>fr — three keys with leader at the head. Make sure the
+        // expansion threads through every key in the sequence (not just
+        // the first character).
+        let cfg = Config {
+            general: crate::config::schema::General {
+                leader_key: ",".into(),
+                ..Default::default()
+            },
+            keymap: crate::config::schema::Keymap {
+                normal: [("<leader>fr".to_string(), "reload_config".to_string())]
+                    .into_iter()
+                    .collect(),
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+        let set = KeymapSet::from_config(&cfg).unwrap();
+        let mut e = Engine::new(set);
+        assert_eq!(e.feed(Key::char(',')), Outcome::Pending);
+        assert_eq!(e.feed(Key::char('f')), Outcome::Pending);
+        assert_eq!(
+            e.feed(Key::char('r')),
+            Outcome::Action(Action::ReloadConfig)
+        );
+    }
+
+    #[test]
+    fn leader_inside_sequence_also_expands() {
+        // `g<leader>` — leader appears mid-sequence, not at the head.
+        // Expansion happens key-by-key, so this should still work.
+        let cfg = Config {
+            general: crate::config::schema::General {
+                leader_key: ",".into(),
+                ..Default::default()
+            },
+            keymap: crate::config::schema::Keymap {
+                normal: [("g<leader>".to_string(), "scroll_top".to_string())]
+                    .into_iter()
+                    .collect(),
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+        let set = KeymapSet::from_config(&cfg).unwrap();
+        let mut e = Engine::new(set);
+        assert_eq!(e.feed(Key::char('g')), Outcome::Pending);
+        assert_eq!(e.feed(Key::char(',')), Outcome::Action(Action::ScrollTop));
+    }
 }
