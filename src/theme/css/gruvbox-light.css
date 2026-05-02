@@ -17,6 +17,8 @@
 window {
   background-color: @kryptos_bg;
   color: @kryptos_fg;
+  font-family: Inter, "Inter Variable", -apple-system, system-ui, sans-serif;
+  font-size: 13px;
 }
 
 headerbar {
@@ -31,19 +33,45 @@ box.sidebar {
   border-right: 1px solid @kryptos_surface;
 }
 
-listview row {
+listview row,
+.kryptos-chat-row,
+listbox.navigation-sidebar > row {
   background-color: transparent;
   color: @kryptos_fg;
-  padding: 6px 10px;
+  padding: 10px 14px;
+  margin: 0;
 }
 
-listview row:hover {
-  background-color: alpha(@kryptos_surface, 0.6);
+/* Selection + hover - subtle, no inverted text. */
+listview row:hover,
+listbox.navigation-sidebar > row:hover,
+.kryptos-chat-row:hover {
+  background-color: alpha(@kryptos_surface, 0.5);
 }
 
-listview row:selected {
-  background-color: @kryptos_surface;
+listview row:selected,
+listbox.navigation-sidebar > row:selected,
+.kryptos-chat-row:selected {
+  background-color: @kryptos_surface2;
   color: @kryptos_fg;
+  box-shadow: inset 3px 0 0 @kryptos_accent;
+}
+
+listview row:selected:hover,
+listbox.navigation-sidebar > row:selected:hover,
+.kryptos-chat-row:selected:hover {
+  background-color: @kryptos_surface2;
+}
+
+/* Thin in-list divider, hidden on the selected row. */
+.kryptos-chat-row,
+listbox.navigation-sidebar > row {
+  border-bottom: 1px solid alpha(@kryptos_surface2, 0.45);
+}
+
+.kryptos-chat-row:selected,
+listbox.navigation-sidebar > row:selected {
+  border-bottom-color: transparent;
 }
 
 textview, textview text {
@@ -71,7 +99,134 @@ entry:focus {
   outline: none;
 }
 
-.modeline.normal   { background-color: @kryptos_green;    color: @kryptos_bg; padding: 2px 8px; font-weight: bold; }
-.modeline.insert   { background-color: @kryptos_blue;     color: @kryptos_bg; padding: 2px 8px; font-weight: bold; }
-.modeline.command  { background-color: @kryptos_lavender; color: @kryptos_bg; padding: 2px 8px; font-weight: bold; }
-.modeline.search   { background-color: @kryptos_yellow;   color: @kryptos_bg; padding: 2px 8px; font-weight: bold; }
+/* ----- Typography scale --------------------------------------------------- */
+
+headerbar windowtitle,
+headerbar .title {
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.kryptos-chat-row .heading,
+listbox.navigation-sidebar > row .heading,
+listview row .heading {
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.kryptos-chat-row .caption,
+.kryptos-chat-row .dim-label,
+listbox.navigation-sidebar > row .caption,
+listbox.navigation-sidebar > row .dim-label,
+listview row .caption,
+listview row .dim-label {
+  font-size: 11px;
+  font-weight: 400;
+  opacity: 0.7;
+}
+
+.bubble {
+  font-size: 14px;
+  font-weight: 400;
+  line-height: 1.5;
+}
+
+.message-meta,
+.bubble .timestamp,
+.bubble .sender {
+  font-size: 10px;
+  font-weight: 500;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  opacity: 0.6;
+}
+
+.mode-line,
+label.mode-line {
+  font-family: "JetBrains Mono", "Fira Code", monospace;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.command-bar-prefix {
+  font-family: "JetBrains Mono", "Fira Code", monospace;
+  font-size: 13px;
+  font-weight: 700;
+  text-transform: uppercase;
+  color: @kryptos_accent;
+  padding-right: 6px;
+}
+
+entry.command-bar-entry,
+.command-bar entry {
+  font-family: "JetBrains Mono", "Fira Code", monospace;
+  font-size: 13px;
+}
+
+/* Quiet, accent-coloured mode text over base bg (not inverted). */
+.modeline.normal,
+.mode-line.mode-normal {
+  background-color: transparent;
+  color: @kryptos_blue;
+  padding: 0;
+  font-weight: 700;
+}
+.modeline.insert,
+.mode-line.mode-insert {
+  background-color: transparent;
+  color: @kryptos_green;
+  padding: 0;
+  font-weight: 700;
+}
+.modeline.command,
+.mode-line.mode-command {
+  background-color: transparent;
+  color: @kryptos_yellow;
+  padding: 0;
+  font-weight: 700;
+}
+.modeline.search,
+.mode-line.mode-search {
+  background-color: transparent;
+  color: @kryptos_red;
+  padding: 0;
+  font-weight: 700;
+}
+
+/* ----- Rhythm + spacing (8px base unit) ----------------------------------- */
+
+.bubble {
+  padding: 10px 14px;
+  border-radius: 10px;
+}
+
+.kryptos-composer,
+.composer-frame {
+  padding: 12px;
+  margin: 0;
+  border-radius: 0;
+  border: none;
+  border-top: 1px solid @kryptos_overlay;
+  background-color: @kryptos_bg;
+}
+
+textview.composer,
+.composer textview,
+.composer-frame textview {
+  background-color: transparent;
+}
+
+.kryptos-modeline,
+.mode-line-row {
+  padding: 4px 14px;
+  background-color: @kryptos_bg;
+  border-top: 1px solid @kryptos_overlay;
+}
+
+.command-bar {
+  padding: 6px 14px;
+  background-color: @kryptos_bg;
+  border-top: 1px solid @kryptos_overlay;
+}
