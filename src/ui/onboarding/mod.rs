@@ -669,44 +669,46 @@ fn install_linker_styles() {
     }
 }
 
+/// Structural styles for the linker. Colour comes from the active
+/// palette (`@kryptos_*` tokens); these rules just set sizes, paddings,
+/// type weights so the linker reads as Swiss minimal: pristine QR card,
+/// generous quiet zone, hero title in monospace, no decorative shadow.
 const LINKER_STYLES: &str = r#"
-.kryptos-linker {
-    background-color: @window_bg_color;
-}
 .kryptos-linker-title {
-    font-weight: 800;
-    letter-spacing: -0.02em;
+    font-size: 28px;
+    font-weight: 600;
+    letter-spacing: -0.01em;
     margin-top: 4px;
 }
 .kryptos-linker-body {
-    font-size: 1.05em;
+    font-size: 14px;
     line-height: 1.5;
     max-width: 460px;
 }
 .kryptos-qr-card {
-    padding: 18px;
-    background-color: white;
-    border-radius: 18px;
-    /* Soft elevation; the card is the hero. */
-    box-shadow:
-        0 1px 2px alpha(black, 0.06),
-        0 12px 32px alpha(black, 0.08);
+    /* Generous quiet zone: 32px on all sides. The DrawingArea paints
+       its own white plate inside, so this padding is the white halo. */
+    padding: 32px;
 }
 .kryptos-qr-canvas {
-    border-radius: 8px;
     background-color: white;
 }
 .kryptos-linker-uri {
-    font-size: 0.82em;
-    letter-spacing: 0.01em;
+    font-size: 12px;
+    letter-spacing: 0;
     margin-top: 4px;
 }
 .kryptos-linker-name {
-    padding: 8px 12px;
-    border-radius: 10px;
+    padding: 10px 12px;
+    border-radius: 4px;
+    font-size: 13px;
 }
 .kryptos-linker-status {
-    font-size: 0.95em;
-    line-height: 1.45;
+    font-size: 13px;
+    line-height: 1.5;
+}
+button.suggested-action.pill {
+    padding: 14px 32px;
+    border-radius: 999px;
 }
 "#;

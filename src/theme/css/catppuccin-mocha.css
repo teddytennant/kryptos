@@ -14,490 +14,285 @@
 @define-color kryptos_red      #f38ba8;
 @define-color kryptos_lavender #b4befe;
 
-window {
+/* ─── Window & top-level surfaces ─────────────────────────────────── */
+
+window,
+.background {
   background-color: @kryptos_bg;
   color: @kryptos_fg;
-  font-family: Inter, "Inter Variable", -apple-system, system-ui, sans-serif;
-  font-size: 13px;
 }
 
-headerbar {
-  background-color: @kryptos_mantle;
+textview, textview text,
+entry, entry text {
+  caret-color: @kryptos_accent;
   color: @kryptos_fg;
-  border-bottom: 1px solid @kryptos_surface;
+}
+
+textview text selection,
+entry text selection {
+  background-color: alpha(@kryptos_accent, 0.22);
+  color: @kryptos_fg;
+}
+
+/* ─── Header bars: flat, transparent, hairline below ──────────────── */
+
+headerbar,
+headerbar.flat {
+  background: transparent;
+  color: @kryptos_fg;
   box-shadow: none;
+  border: none;
 }
 
-box.sidebar {
+.sidebar-header {
+  border-bottom: 1px solid alpha(@kryptos_fg, 0.06);
+}
+
+/* ─── Sidebar surface + hairline divider to content ───────────────── */
+
+box.sidebar,
+.sidebar {
   background-color: @kryptos_mantle;
-  border-right: 1px solid @kryptos_surface;
+  border-right: 1px solid alpha(@kryptos_fg, 0.06);
 }
 
-listview row,
-.kryptos-chat-row,
-listbox.navigation-sidebar > row {
+/* `OverlaySplitView` exposes its sidebar as `.sidebar-pane`; carry the
+   same hairline so we never see libadwaita's stronger default border. */
+overlaysplitview > .sidebar-pane {
+  background-color: @kryptos_mantle;
+  border-right: 1px solid alpha(@kryptos_fg, 0.06);
+}
+
+/* ─── Sidebar search ──────────────────────────────────────────────── */
+
+.sidebar-search {
+  background-color: alpha(@kryptos_fg, 0.04);
+  border: 1px solid alpha(@kryptos_fg, 0.06);
+  color: @kryptos_fg;
+  caret-color: @kryptos_accent;
+  transition: border-color 120ms ease-out, background-color 120ms ease-out;
+}
+.sidebar-search:focus-within {
+  border-color: alpha(@kryptos_accent, 0.55);
+  background-color: alpha(@kryptos_fg, 0.06);
+}
+
+/* ─── Chat rows — selected = accent stripe + tint, no fill ────────── */
+
+listbox.navigation-sidebar,
+listbox.navigation-sidebar > row,
+.kryptos-chat-row {
   background-color: transparent;
   color: @kryptos_fg;
-  padding: 10px 14px;
-  margin: 0;
 }
 
-/* Selection + hover - subtle, no inverted text. */
-listview row:hover,
-listbox.navigation-sidebar > row:hover,
-.kryptos-chat-row:hover {
-  background-color: alpha(@kryptos_surface, 0.5);
-}
-
-listview row:selected,
-listbox.navigation-sidebar > row:selected,
-.kryptos-chat-row:selected {
-  background-color: @kryptos_surface2;
-  color: @kryptos_fg;
-  box-shadow: inset 3px 0 0 @kryptos_accent;
-}
-
-listview row:selected:hover,
-listbox.navigation-sidebar > row:selected:hover,
-.kryptos-chat-row:selected:hover {
-  background-color: @kryptos_surface2;
-}
-
-/* Thin in-list divider, hidden on the selected row. */
-.kryptos-chat-row,
-listbox.navigation-sidebar > row {
-  border-bottom: 1px solid alpha(@kryptos_surface2, 0.35);
+.kryptos-chat-row:hover,
+listbox.navigation-sidebar > row:hover {
+  background-color: alpha(@kryptos_fg, 0.04);
 }
 
 .kryptos-chat-row:selected,
 listbox.navigation-sidebar > row:selected {
-  border-bottom-color: transparent;
-}
-
-textview, textview text {
-  background-color: @kryptos_bg;
+  background-color: alpha(@kryptos_accent, 0.07);
+  border-left-color: @kryptos_accent;
   color: @kryptos_fg;
-  caret-color: @kryptos_lavender;
+  box-shadow: none;
 }
-
-textview text selection {
-  background-color: alpha(@kryptos_lavender, 0.35);
-  color: @kryptos_fg;
-}
-
-entry {
-  background-color: @kryptos_mantle;
-  color: @kryptos_fg;
-  border: 1px solid @kryptos_surface;
-  border-radius: 4px;
-  padding: 4px 8px;
-  caret-color: @kryptos_lavender;
-}
-
-entry:focus {
-  border-color: @kryptos_accent;
-  outline: none;
-}
-
-/* ----- Typography scale --------------------------------------------------- */
-
-headerbar windowtitle,
-headerbar .title {
-  font-size: 13px;
-  font-weight: 600;
-}
-
-.kryptos-chat-row .heading,
-listbox.navigation-sidebar > row .heading,
-listview row .heading {
-  font-size: 13px;
-  font-weight: 600;
-}
-
-.kryptos-chat-row .caption,
-.kryptos-chat-row .dim-label,
-listbox.navigation-sidebar > row .caption,
-listbox.navigation-sidebar > row .dim-label,
-listview row .caption,
-listview row .dim-label {
-  font-size: 11px;
-  font-weight: 400;
-  opacity: 0.6;
-}
-
-.bubble {
-  font-size: 14px;
-  font-weight: 400;
-  line-height: 1.5;
-}
-
-.message-meta,
-.bubble .timestamp,
-.bubble .sender {
-  font-size: 10px;
-  font-weight: 500;
-  letter-spacing: 0.04em;
-  text-transform: uppercase;
-  opacity: 0.5;
-}
-
-.mode-line,
-label.mode-line {
-  font-family: "JetBrains Mono", "Fira Code", monospace;
-  font-size: 11px;
-  font-weight: 700;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-}
-
-.command-bar-prefix {
-  font-family: "JetBrains Mono", "Fira Code", monospace;
-  font-size: 13px;
-  font-weight: 700;
-  text-transform: uppercase;
-  color: @kryptos_accent;
-  padding-right: 6px;
-}
-
-entry.command-bar-entry,
-.command-bar entry {
-  font-family: "JetBrains Mono", "Fira Code", monospace;
-  font-size: 13px;
-}
-
-/* Quiet, accent-coloured mode text over base bg (not inverted). */
-.modeline.normal,
-.mode-line.mode-normal {
-  background-color: transparent;
-  color: @kryptos_blue;
-  padding: 0;
-  font-weight: 700;
-}
-.modeline.insert,
-.mode-line.mode-insert {
-  background-color: transparent;
-  color: @kryptos_green;
-  padding: 0;
-  font-weight: 700;
-}
-.modeline.command,
-.mode-line.mode-command {
-  background-color: transparent;
-  color: @kryptos_yellow;
-  padding: 0;
-  font-weight: 700;
-}
-.modeline.search,
-.mode-line.mode-search {
-  background-color: transparent;
-  color: @kryptos_red;
-  padding: 0;
-  font-weight: 700;
-}
-
-/* ----- Rhythm + spacing (8px base unit) ----------------------------------- */
-
-.bubble {
-  padding: 10px 14px;
-  border-radius: 10px;
-}
-
-.kryptos-composer,
-.composer-frame {
-  padding: 12px;
-  margin: 0;
-  border-radius: 0;
-  border: none;
-  border-top: 1px solid @kryptos_overlay;
-  background-color: @kryptos_bg;
-}
-
-textview.composer,
-.composer textview,
-.composer-frame textview {
-  background-color: transparent;
-}
-
-.kryptos-modeline,
-.mode-line-row {
-  padding: 4px 14px;
-  background-color: @kryptos_bg;
-  border-top: 1px solid @kryptos_overlay;
-}
-
-.command-bar {
-  padding: 6px 14px;
-  background-color: @kryptos_bg;
-  border-top: 1px solid @kryptos_overlay;
-}
-
-/* ----- Visual polish (shared block, palette-driven) ----------------------- */
-
-/* Sidebar header & search */
-
-.sidebar-header,
-.sidebar headerbar {
-  background-color: @kryptos_mantle;
-  border-bottom: 1px solid alpha(@kryptos_surface2, 0.5);
-}
-
-.sidebar-search {
-  background-color: alpha(@kryptos_surface, 0.6);
-  border: 1px solid alpha(@kryptos_surface2, 0.6);
-  border-radius: 8px;
-  padding: 4px 8px;
-  margin: 6px 10px 8px;
-  caret-color: @kryptos_accent;
-  transition: border-color 120ms ease-out, background-color 120ms ease-out;
-}
-
-.sidebar-search:focus-within {
-  border-color: @kryptos_accent;
-  background-color: alpha(@kryptos_surface, 0.85);
-}
-
-/* Chat row — two-line designed list */
-
-.kryptos-chat-row,
-listbox.navigation-sidebar > row {
-  padding: 12px 16px;
-  transition: background-color 120ms ease-out;
+.kryptos-chat-row:selected:hover,
+listbox.navigation-sidebar > row:selected:hover {
+  background-color: alpha(@kryptos_accent, 0.10);
 }
 
 .kryptos-chat-row .chat-avatar {
-  min-width: 36px;
-  min-height: 36px;
-  border-radius: 18px;
-  background-color: alpha(@kryptos_accent, 0.22);
+  background-color: alpha(@kryptos_accent, 0.16);
   color: @kryptos_accent;
-  font-size: 13px;
-  font-weight: 700;
-  letter-spacing: 0.02em;
 }
-
 .kryptos-chat-row .chat-name {
-  font-size: 14px;
-  font-weight: 600;
   color: @kryptos_fg;
 }
-
-.kryptos-chat-row .chat-preview {
-  font-size: 12px;
-  font-weight: 400;
-  opacity: 0.7;
-  color: @kryptos_subtle;
-}
-
+.kryptos-chat-row .chat-preview,
 .kryptos-chat-row .chat-timestamp {
-  font-size: 11px;
-  font-weight: 500;
-  opacity: 0.55;
   color: @kryptos_subtle;
-  font-feature-settings: "tnum" 1;
 }
-
-.kryptos-chat-row:selected .chat-name,
-listbox.navigation-sidebar > row:selected .chat-name {
-  color: @kryptos_fg;
-}
-
 .kryptos-chat-row:selected .chat-avatar,
 listbox.navigation-sidebar > row:selected .chat-avatar {
-  background-color: alpha(@kryptos_accent, 0.32);
+  background-color: alpha(@kryptos_accent, 0.24);
 }
 
-/* Content header */
-
-.chat-presence {
-  font-size: 11px;
-  font-weight: 500;
-  opacity: 0.6;
-  letter-spacing: 0.02em;
-}
-
-/* Messages */
-
-.message-row {
-  margin: 2px 0;
-}
-
-.message-sender {
-  font-size: 11px;
-  font-weight: 600;
-  letter-spacing: 0.04em;
-  text-transform: uppercase;
-  opacity: 0.55;
-  margin: 4px 4px 2px;
-}
-
-.message-row.mine .message-sender {
-  color: @kryptos_accent;
-}
-
-.message-timestamp {
-  font-size: 11px;
-  font-weight: 500;
-  opacity: 0;
-  color: @kryptos_subtle;
-  margin: 2px 4px 0;
-  font-feature-settings: "tnum" 1;
-  transition: opacity 150ms ease-out;
-}
-
-.message-row:hover .message-timestamp {
-  opacity: 0.6;
-}
-
-.bubble {
-  border-radius: 16px;
-  padding: 9px 14px;
-  box-shadow: 0 1px 2px rgba(0,0,0,0.10);
-  transition: box-shadow 150ms ease-out;
-}
+/* ─── Messages & bubbles — no shadow, single radius ───────────────── */
 
 .bubble-mine {
   background-color: alpha(@kryptos_accent, 0.85);
   color: @kryptos_mantle;
 }
-
 .bubble-theirs {
-  background-color: @kryptos_surface;
+  background-color: alpha(@kryptos_fg, 0.06);
   color: @kryptos_fg;
 }
 
-/* Composer — frame, focus ring, and pill mode badge */
-
-.composer-frame {
-  border-radius: 12px;
-  border: 1px solid alpha(@kryptos_surface2, 0.6);
-  background-color: alpha(@kryptos_mantle, 0.6);
-  margin: 8px 12px 12px;
-  padding: 0;
-  transition: border-color 150ms ease-out, box-shadow 150ms ease-out;
+.message-timestamp {
+  color: @kryptos_subtle;
+  opacity: 0;
+  transition: opacity 150ms ease-out;
+}
+.message-row:hover .message-timestamp {
+  opacity: 0.55;
 }
 
-.composer-frame:focus-within {
-  border-color: @kryptos_accent;
-  box-shadow: 0 0 0 3px alpha(@kryptos_accent, 0.18);
+/* ─── Composer host + mode-tinted leading stripe + caret ──────────── */
+
+.kryptos-composer-host {
+  background-color: @kryptos_bg;
 }
 
-.kryptos-composer,
-.composer-frame textview {
-  background-color: transparent;
-  padding: 8px 4px;
-  border: none;
-  border-top: none;
+.kryptos-composer-wrapper.composer-normal {
+  border-left-color: @kryptos_blue;
+}
+.kryptos-composer-wrapper.composer-insert {
+  border-left-color: @kryptos_green;
+}
+.kryptos-composer-wrapper.composer-visual {
+  border-left-color: @kryptos_yellow;
 }
 
-.composer-mode-badge {
-  font-family: "JetBrains Mono", "Fira Code", monospace;
-  font-size: 10px;
-  font-weight: 700;
-  letter-spacing: 0.10em;
-  text-transform: uppercase;
-  padding: 2px 8px 2px 6px;
-  border-radius: 999px;
-  background-color: alpha(@kryptos_accent, 0.18);
-  color: @kryptos_accent;
-}
+.kryptos-composer-wrapper.composer-normal .kryptos-composer { caret-color: @kryptos_blue; }
+.kryptos-composer-wrapper.composer-insert .kryptos-composer { caret-color: @kryptos_green; }
+.kryptos-composer-wrapper.composer-visual .kryptos-composer { caret-color: @kryptos_yellow; }
 
-.composer-insert .composer-mode-badge {
-  background-color: alpha(@kryptos_green, 0.20);
-  color: @kryptos_green;
-}
-
-.composer-visual .composer-mode-badge {
-  background-color: alpha(@kryptos_yellow, 0.20);
-  color: @kryptos_yellow;
-}
-
-.composer-mode-dot {
-  font-size: 12px;
-  margin-right: 4px;
-  opacity: 0.85;
-}
-
-/* Mode line — three sections, neovim-style */
+/* ─── Mode line — palette skin over structural chassis ───────────── */
 
 .kryptos-modeline,
 .mode-line-row {
-  padding: 0;
   background-color: @kryptos_mantle;
-  border-top: 1px solid alpha(@kryptos_surface2, 0.6);
-  min-height: 24px;
+  color: @kryptos_subtle;
+  border-top: 1px solid alpha(@kryptos_fg, 0.06);
 }
-
-.modeline-section {
-  font-family: "JetBrains Mono", "Fira Code", monospace;
-  font-size: 12px;
-  padding: 4px 12px;
-}
-
-.modeline-section.left {
-  padding: 0;
-}
-
-.modeline-mode-block {
-  font-family: "JetBrains Mono", "Fira Code", monospace;
-  font-size: 12px;
-  font-weight: 700;
-  letter-spacing: 0.10em;
-  text-transform: uppercase;
-  padding: 4px 14px;
-  color: @kryptos_mantle;
-  background-color: @kryptos_blue;
-}
-
-.modeline-mode-block.mode-normal { background-color: @kryptos_blue;   color: @kryptos_mantle; }
-.modeline-mode-block.mode-insert { background-color: @kryptos_green;  color: @kryptos_mantle; }
-.modeline-mode-block.mode-command { background-color: @kryptos_yellow; color: @kryptos_mantle; }
-.modeline-mode-block.mode-search { background-color: @kryptos_red;    color: @kryptos_mantle; }
 
 .modeline-section.center {
   color: @kryptos_fg;
-  opacity: 0.85;
 }
 
-.modeline-section.right {
-  color: @kryptos_subtle;
-  opacity: 0.75;
-  font-feature-settings: "tnum" 1;
+.modeline-mode-block.mode-normal,
+.mode-line.mode-normal,
+.modeline.normal {
+  color: @kryptos_blue;
 }
+.modeline-mode-block.mode-insert,
+.mode-line.mode-insert,
+.modeline.insert {
+  color: @kryptos_green;
+}
+.modeline-mode-block.mode-command,
+.mode-line.mode-command,
+.modeline.command {
+  color: @kryptos_yellow;
+}
+.modeline-mode-block.mode-search,
+.mode-line.mode-search,
+.modeline.search {
+  color: @kryptos_red;
+}
+
+.modeline-mode-glyph.mode-normal { color: @kryptos_blue; }
+.modeline-mode-glyph.mode-insert { color: @kryptos_green; }
+.modeline-mode-glyph.mode-command { color: @kryptos_yellow; }
+.modeline-mode-glyph.mode-search { color: @kryptos_red; }
 
 .modeline-separator {
-  color: alpha(@kryptos_subtle, 0.4);
-  padding: 0 6px;
+  color: alpha(@kryptos_fg, 0.25);
 }
 
-/* Empty state */
+/* ─── Command bar ─────────────────────────────────────────────────── */
 
-.empty-state {
-  padding: 32px 24px;
+.command-bar {
+  background-color: @kryptos_mantle;
+  color: @kryptos_fg;
+  border-top: 1px solid alpha(@kryptos_fg, 0.06);
 }
-
-.empty-state-glyph {
-  font-size: 64px;
-  opacity: 0.18;
+.command-bar-prefix {
   color: @kryptos_accent;
 }
 
-.empty-state-title {
-  font-size: 15px;
-  font-weight: 600;
+/* ─── Settings (AdwPreferencesWindow) — tighter spacing, tokens ───── */
+
+preferenceswindow,
+preferenceswindow .background {
+  background-color: @kryptos_bg;
   color: @kryptos_fg;
-  opacity: 0.7;
 }
-
-.empty-state-subtitle {
+preferencespage,
+preferencesgroup {
+  background-color: transparent;
+}
+preferencesgroup > box > label.heading {
   font-size: 12px;
-  font-weight: 400;
-  color: @kryptos_subtle;
-  opacity: 0.7;
+  font-weight: 600;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  opacity: 0.55;
+  color: @kryptos_fg;
+}
+preferenceswindow listbox.boxed-list,
+preferenceswindow listbox.boxed-list-separate {
+  background-color: @kryptos_mantle;
+  border: 1px solid alpha(@kryptos_fg, 0.06);
+  border-radius: 8px;
+}
+preferenceswindow listbox.boxed-list > row {
+  background-color: transparent;
+  border-bottom: 1px solid alpha(@kryptos_fg, 0.06);
+}
+preferenceswindow listbox.boxed-list > row:last-child {
+  border-bottom: none;
 }
 
-/* Header bar info / compose icon buttons */
+/* ─── Linker (onboarding) — Swiss "shop window" QR card ───────────── */
 
-headerbar button.flat {
-  border-radius: 999px;
-  transition: background-color 120ms ease-out;
+.kryptos-linker {
+  background-color: @kryptos_bg;
+  color: @kryptos_fg;
+}
+.kryptos-linker-title {
+  color: @kryptos_fg;
+}
+.kryptos-linker-body {
+  color: @kryptos_subtle;
+}
+.kryptos-qr-card {
+  background-color: white;
+  border: 1px solid alpha(@kryptos_fg, 0.10);
+  border-radius: 0;
+  box-shadow: none;
+}
+.kryptos-linker-uri {
+  color: @kryptos_subtle;
+}
+.kryptos-linker-name {
+  background-color: alpha(@kryptos_fg, 0.04);
+  border: 1px solid alpha(@kryptos_fg, 0.06);
+  color: @kryptos_fg;
+  caret-color: @kryptos_accent;
+}
+.kryptos-linker-name:focus {
+  border-color: alpha(@kryptos_accent, 0.55);
+}
+.kryptos-linker-status {
+  color: @kryptos_subtle;
+}
+button.suggested-action.pill {
+  background-color: @kryptos_accent;
+  color: @kryptos_mantle;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+}
+button.suggested-action.pill:hover {
+  background-color: alpha(@kryptos_accent, 0.85);
+}
+
+/* ─── Toast bg follows palette mantle, not libadwaita default ─────── */
+.toast {
+  background-color: @kryptos_surface;
+  color: @kryptos_fg;
+  box-shadow: none;
+  border: 1px solid alpha(@kryptos_fg, 0.06);
 }

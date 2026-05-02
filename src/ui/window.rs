@@ -11,7 +11,7 @@
 //! ├────────────────────────────────────────────┤
 //! │  command bar (hidden by default)           │
 //! ├────────────────────────────────────────────┤
-//! │  -- NORMAL --                              │
+//! │  ▎ NORMAL                                  │
 //! └────────────────────────────────────────────┘
 //! ```
 
@@ -51,6 +51,11 @@ const PLACEHOLDER_MESSAGES: &[(bool, &str, &str)] = &[
 ];
 
 pub fn build(app: &adw::Application, cfg: &Config) -> WindowParts {
+    // Force JetBrains Mono Nerd Font as the default app face *before* any
+    // widget gets sized. Pango caches font extents per widget, so doing
+    // this after `build_*` would leave existing widgets at the old metric.
+    apply_default_font();
+
     let sidebar_list = build_sidebar_list();
     let sidebar_search = build_sidebar_search();
     let sidebar = build_sidebar(&sidebar_list, &sidebar_search);
@@ -60,9 +65,9 @@ pub fn build(app: &adw::Application, cfg: &Config) -> WindowParts {
         .sidebar(&sidebar)
         .content(&content)
         .show_sidebar(true)
-        .min_sidebar_width(220.0)
+        .min_sidebar_width(280.0)
         .max_sidebar_width(360.0)
-        .sidebar_width_fraction(0.27)
+        .sidebar_width_fraction(0.26)
         .build();
     split.set_vexpand(true);
 
@@ -256,14 +261,17 @@ fn build_content() -> (gtk::Widget, Composer, gtk::Button, gtk::Button) {
     header.pack_end(&prefs_button);
     header.pack_end(&link_button);
 
+    // 8px grid: 32 sides, 24 top, 16 bottom. The composer carries its
+    // own breathing room so the message tail doesn't crowd against it.
     let messages_box = gtk::Box::builder()
         .orientation(gtk::Orientation::Vertical)
-        .spacing(2)
+        .spacing(0)
         .build();
-    messages_box.set_margin_start(28);
-    messages_box.set_margin_end(28);
-    messages_box.set_margin_top(20);
-    messages_box.set_margin_bottom(8);
+    messages_box.add_css_class("kryptos-messages");
+    messages_box.set_margin_start(32);
+    messages_box.set_margin_end(32);
+    messages_box.set_margin_top(24);
+    messages_box.set_margin_bottom(16);
 
     for (mine, body, ts) in PLACEHOLDER_MESSAGES {
         messages_box.append(&message_row(*mine, body, ts));
@@ -276,21 +284,21 @@ fn build_content() -> (gtk::Widget, Composer, gtk::Button, gtk::Button) {
         .child(&messages_box)
         .build();
 
+    // Swiss restraint: no card, no shadow around the composer. A single
+    // hairline rule above is enough to anchor it. The mode tint comes
+    // from a leading-edge stripe painted via `.composer-{normal,insert,…}`.
     let composer = Composer::new();
-
-    let composer_frame = gtk::Frame::new(None);
-    composer_frame.set_child(Some(composer.widget()));
-    composer_frame.add_css_class("composer-frame");
-    composer_frame.set_margin_start(20);
-    composer_frame.set_margin_end(20);
-    composer_frame.set_margin_top(8);
-    composer_frame.set_margin_bottom(16);
+    let composer_host = gtk::Box::builder()
+        .orientation(gtk::Orientation::Vertical)
+        .build();
+    composer_host.add_css_class("kryptos-composer-host");
+    composer_host.append(composer.widget());
 
     let body = gtk::Box::builder()
         .orientation(gtk::Orientation::Vertical)
         .build();
     body.append(&messages_scroll);
-    body.append(&composer_frame);
+    body.append(&composer_host);
 
     let toolbar = adw::ToolbarView::new();
     toolbar.add_top_bar(&header);
@@ -330,8 +338,23 @@ fn message_row(mine: bool, body: &str, timestamp: &str) -> gtk::Widget {
     row.upcast::<gtk::Widget>()
 }
 
-/// Inject a small in-process stylesheet so the mode line + bubbles get
-/// some shape without dragging in a `.css` resource yet.
+/// JetBrains Mono Nerd Font as the system face. Setting `gtk-font-name`
+/// on `gtk::Settings` makes every default-font widget — labels, entries,
+/// buttons, tooltips — pick it up without per-widget CSS.
+fn apply_default_font() {
+    if let Some(settings) = gtk::Settings::default() {
+        settings.set_property("gtk-font-name", "JetBrainsMono Nerd Font 11");
+    }
+}
+
+/// Inject the structural stylesheet — sizes, paddings, hairlines, type
+/// scale. Colour comes entirely from `@kryptos_*` palette tokens defined
+/// in `src/theme/css/*.css`, so this layer is theme-agnostic.
+///
+/// We register at `PRIORITY_APPLICATION - 1` so the active palette (added
+/// later at `PRIORITY_APPLICATION` by `ThemeManager`) wins on conflicts.
+/// The relationship is a clean lattice: skeleton (this) < skin (palette)
+/// < user override (custom-css at +1).
 fn install_styles() {
     let provider = gtk::CssProvider::new();
     provider.load_from_string(STYLES);
@@ -339,105 +362,205 @@ fn install_styles() {
         gtk::style_context_add_provider_for_display(
             &display,
             &provider,
-            gtk::STYLE_PROVIDER_PRIORITY_APPLICATION,
+            gtk::STYLE_PROVIDER_PRIORITY_APPLICATION - 1,
         );
     }
 }
 
-/// Functional layer of styles. Visual tokens (colours, accents) come
-/// from the active palette CSS in `src/theme/css/`; this layer just
-/// sets sizes, paddings, weights, and transitions that don't depend
-/// on the palette.
+/// Structural stylesheet — Swiss/Bauhaus discipline. Type scale:
+/// `xs=11`, `sm=12`, `md=13` (chat body), `lg=15` (chat title),
+/// `xl=20` (linker hero). Weights: 400 / 500 / 600 / 700. Hairlines
+/// use `alpha(currentColor, 0.06)` so they tint with the palette `fg`.
 const STYLES: &str = r#"
-/* Modeline */
+/* ── Typography baseline ───────────────────────────────────────────── */
+* {
+    font-family: "JetBrainsMono Nerd Font", "JetBrains Mono", monospace;
+}
+window {
+    font-size: 13px;
+}
+/* Tabular figures wherever digits appear so columns never shift. */
+.chat-timestamp,
+.kryptos-modeline,
+.modeline-mode-block,
+.modeline-section,
+.command-bar,
+.command-bar-entry,
+.message-timestamp {
+    font-feature-settings: "tnum" 1, "ss20" 1;
+}
+
+/* ── Header chrome: disappears ─────────────────────────────────────── */
+headerbar.flat {
+    background: transparent;
+    box-shadow: none;
+    border: none;
+    min-height: 40px;
+}
+headerbar windowtitle {
+    font-weight: 600;
+    font-size: 15px;
+    letter-spacing: -0.005em;
+}
+headerbar windowtitle .subtitle {
+    /* No subtitle anywhere — the chat name carries weight on its own. */
+    font-size: 0;
+    margin: 0;
+    padding: 0;
+}
+headerbar button.flat {
+    border-radius: 6px;
+    min-width: 32px;
+    min-height: 32px;
+    padding: 0;
+    background: transparent;
+    transition: background-color 120ms ease-out;
+}
+headerbar button.flat:hover {
+    background-color: alpha(currentColor, 0.06);
+}
+headerbar button.flat:active {
+    background-color: alpha(currentColor, 0.10);
+}
+windowcontrols button {
+    min-width: 28px;
+    min-height: 28px;
+}
+
+/* ── Sidebar header: small caps "Chats" ────────────────────────────── */
+.sidebar-header {
+    border-bottom: 1px solid alpha(currentColor, 0.06);
+}
+.sidebar-header windowtitle {
+    font-size: 12px;
+    font-weight: 600;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    opacity: 0.55;
+}
+
+/* ── Sidebar list & chat rows ──────────────────────────────────────── */
+.sidebar-search {
+    margin: 8px 16px 8px;
+    padding: 6px 10px;
+    border-radius: 4px;
+    font-size: 13px;
+}
+.kryptos-chat-row {
+    padding: 14px 16px;
+    transition: background-color 100ms ease-out;
+    border-left: 2px solid transparent;
+}
+.kryptos-chat-row:hover {
+    background-color: alpha(currentColor, 0.04);
+}
+.kryptos-chat-row .chat-avatar {
+    min-width: 36px;
+    min-height: 36px;
+    border-radius: 18px;
+    font-size: 13px;
+    font-weight: 600;
+}
+.kryptos-chat-row .chat-name {
+    font-size: 13px;
+    font-weight: 600;
+    letter-spacing: -0.005em;
+}
+.kryptos-chat-row .chat-preview {
+    font-size: 12px;
+    font-weight: 400;
+    opacity: 0.55;
+}
+.kryptos-chat-row .chat-timestamp {
+    font-size: 11px;
+    font-weight: 500;
+    opacity: 0.45;
+}
+
+/* ── Messages area & bubbles ───────────────────────────────────────── */
+.message-row {
+    margin: 4px 0;
+}
+.bubble {
+    padding: 10px 16px;
+    border-radius: 16px;
+    font-size: 13px;
+    line-height: 1.5;
+    box-shadow: none;
+}
+
+/* ── Composer host: hairline rule + mode-color leading stripe ──────── */
+.kryptos-composer-host {
+    border-top: 1px solid alpha(currentColor, 0.06);
+    padding: 12px 32px 16px;
+}
+.kryptos-composer-wrapper {
+    border-left: 3px solid transparent;
+    padding-left: 12px;
+    transition: border-color 120ms ease-out;
+}
+.kryptos-composer,
+.kryptos-composer text {
+    background-color: transparent;
+    font-size: 13px;
+    line-height: 1.55;
+}
+
+/* ── Mode line: three sections, monospace, tabular ─────────────────── */
 .kryptos-modeline {
-    border-top: 1px solid alpha(currentColor, 0.08);
-    min-height: 26px;
-    font-family: "JetBrains Mono", "Fira Code", monospace;
+    border-top: 1px solid alpha(currentColor, 0.06);
+    min-height: 28px;
     font-size: 12px;
 }
-.modeline-section { padding: 4px 14px; }
-.modeline-section.left { padding: 0; }
-.modeline-section.center { opacity: 0.7; }
-.modeline-section.right { opacity: 0.55; font-feature-settings: "tnum" 1; padding-right: 14px; }
+.modeline-section {
+    padding: 4px 12px;
+}
+.modeline-section.left {
+    padding: 0;
+}
+.modeline-section.center {
+    opacity: 0.55;
+    font-weight: 500;
+    letter-spacing: -0.005em;
+}
+.modeline-section.right {
+    opacity: 0.55;
+    padding-right: 14px;
+}
 .modeline-mode-block {
     font-weight: 700;
-    letter-spacing: 0.12em;
+    letter-spacing: 0.14em;
     text-transform: uppercase;
-    padding: 4px 14px;
-    background-color: @accent_bg_color;
-    color: @accent_fg_color;
+    padding: 4px 14px 4px 0;
 }
-.modeline-mode-block.mode-normal { background-color: #89b4fa; color: #1e1e2e; }
-.modeline-mode-block.mode-insert { background-color: #a6e3a1; color: #1e1e2e; }
-.modeline-mode-block.mode-command { background-color: #f9e2af; color: #1e1e2e; }
-.modeline-mode-block.mode-search  { background-color: #f38ba8; color: #1e1e2e; }
+.modeline-mode-glyph {
+    font-weight: 700;
+    padding: 0 8px 0 10px;
+    letter-spacing: 0;
+}
+.modeline-separator {
+    opacity: 0.25;
+    padding: 0 8px;
+}
 
-/* Command bar */
+/* ── Command bar: ghost line, mono ─────────────────────────────────── */
 .command-bar {
     padding: 8px 16px;
-    font-family: "JetBrains Mono", "Fira Code", monospace;
-    border-top: 1px solid alpha(currentColor, 0.08);
+    border-top: 1px solid alpha(currentColor, 0.06);
+    font-size: 13px;
 }
-.command-bar-prefix { font-weight: 700; padding-right: 6px; opacity: 0.6; }
-
-/* Sidebar search + chat row */
-.sidebar-search { margin: 8px 12px 4px; border-radius: 10px; }
-.kryptos-chat-row { padding: 12px 14px; transition: background-color 120ms ease-out; }
-.kryptos-chat-row .chat-avatar {
-    min-width: 36px; min-height: 36px; border-radius: 18px;
-    background-color: alpha(@accent_color, 0.22);
-    color: @accent_color;
-    font-size: 13px; font-weight: 700;
+.command-bar-prefix {
+    font-weight: 700;
+    padding-right: 6px;
+    letter-spacing: 0.06em;
 }
-.kryptos-chat-row .chat-name { font-size: 14px; font-weight: 600; }
-.kryptos-chat-row .chat-preview { font-size: 12px; opacity: 0.62; }
-.kryptos-chat-row .chat-timestamp {
-    font-size: 11px; font-weight: 500; opacity: 0.5;
-    font-feature-settings: "tnum" 1;
+.command-bar entry {
+    background: transparent;
+    border: none;
+    box-shadow: none;
+    padding: 0;
+    min-height: 0;
 }
-
-/* Header chrome — flat & quiet, the chat content is the story */
-headerbar.flat { background: transparent; box-shadow: none; border: none; min-height: 44px; }
-headerbar windowtitle { font-weight: 600; font-size: 14px; }
-headerbar button.flat { border-radius: 999px; min-width: 30px; min-height: 30px; padding: 4px; }
-
-/* Sidebar header gets a subtle separator from content */
-.sidebar-header { border-bottom: 1px solid alpha(currentColor, 0.06); }
-
-/* Messages */
-.message-row { margin: 3px 0; }
-.bubble {
-    padding: 9px 14px;
-    border-radius: 18px;
-    font-size: 14px;
-    line-height: 1.4;
-}
-.bubble-mine {
-    background-color: @accent_bg_color;
-    color: @accent_fg_color;
-    border-bottom-right-radius: 6px;
-}
-.bubble-theirs {
-    background-color: alpha(currentColor, 0.08);
-    border-bottom-left-radius: 6px;
-}
-
-/* Composer */
-.composer-frame {
-    border-radius: 14px;
-    border: 1px solid alpha(currentColor, 0.10);
-    background-color: alpha(currentColor, 0.03);
-    transition: border-color 150ms ease-out, box-shadow 150ms ease-out;
-}
-.composer-frame:focus-within {
-    border-color: @accent_color;
-    box-shadow: 0 0 0 3px alpha(@accent_color, 0.16);
-}
-.kryptos-composer, .composer-frame textview { background-color: transparent; font-size: 14px; }
-.kryptos-composer-wrapper.composer-normal { caret-color: alpha(@accent_color, 0.85); }
-.kryptos-composer-wrapper.composer-insert { caret-color: @accent_color; }
-.kryptos-composer-wrapper.composer-visual { caret-color: #f9e2af; }
 "#;
 
 /// Helper: select the row N positions from the current selection in
