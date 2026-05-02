@@ -62,6 +62,13 @@ fn activate(app: &adw::Application) {
         }
     };
 
+    if cfg.backends.telegram.enabled {
+        warn!(
+            "Telegram backend is enabled in config but requires manual login — \
+             use `:telegram-login` (TODO)"
+        );
+    }
+
     let parts = window::build(app, &cfg);
 
     // Install theme stack against the default display and apply the

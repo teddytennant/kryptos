@@ -45,3 +45,17 @@ dnd_per_chat = true
 [appearance]
 font = "Inter 11"
 message_bubbles = true
+
+# Messenger backends. Signal (signal-cli over D-Bus) is the default;
+# Telegram support uses grammers-client and is opt-in.
+[backends.signal]
+enabled = true
+
+[backends.telegram]
+enabled = false
+# Get api_id / api_hash from https://my.telegram.org → API development tools.
+api_id = 0
+api_hash = ""
+# Where grammers-session persists the auth blob. Empty means
+# $XDG_DATA_HOME/kryptos/telegram.session.
+session_path = ""

@@ -14,6 +14,7 @@
 //! mix backends without losing track of where a conversation came from.
 
 pub mod signal;
+pub mod telegram;
 
 use std::fmt;
 use std::path::PathBuf;

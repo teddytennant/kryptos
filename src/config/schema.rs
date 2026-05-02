@@ -9,6 +9,7 @@ pub struct Config {
     pub keymap: Keymap,
     pub notifications: Notifications,
     pub appearance: Appearance,
+    pub backends: Backends,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -73,6 +74,40 @@ impl Default for Appearance {
     }
 }
 
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct Backends {
+    pub signal: SignalBackendConfig,
+    pub telegram: TelegramBackendConfig,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct SignalBackendConfig {
+    pub enabled: bool,
+}
+
+impl Default for SignalBackendConfig {
+    fn default() -> Self {
+        // Signal is the original backend; default to on so existing
+        // configs without a [backends.signal] block keep working.
+        Self { enabled: true }
+    }
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct TelegramBackendConfig {
+    pub enabled: bool,
+    pub api_id: i32,
+    pub api_hash: String,
+    /// Where `grammers-session` persists the auth blob. Empty string
+    /// means "fall back to `$XDG_DATA_HOME/kryptos/telegram.session`";
+    /// callers materialise the default at use-site so we don't need
+    /// directories::ProjectDirs in the schema layer.
+    pub session_path: String,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -87,6 +122,30 @@ mod tests {
         assert!(cfg.general.hyprland_blur);
         assert!(cfg.notifications.enabled);
         assert_eq!(cfg.appearance.font, "Inter 11");
+        assert!(cfg.backends.signal.enabled, "signal on by default");
+        assert!(!cfg.backends.telegram.enabled, "telegram off by default");
+    }
+
+    #[test]
+    fn parses_backends_section() {
+        let cfg: Config = toml::from_str(
+            r#"
+[backends.signal]
+enabled = false
+
+[backends.telegram]
+enabled = true
+api_id = 12345
+api_hash = "deadbeef"
+session_path = "/tmp/tg.session"
+"#,
+        )
+        .unwrap();
+        assert!(!cfg.backends.signal.enabled);
+        assert!(cfg.backends.telegram.enabled);
+        assert_eq!(cfg.backends.telegram.api_id, 12345);
+        assert_eq!(cfg.backends.telegram.api_hash, "deadbeef");
+        assert_eq!(cfg.backends.telegram.session_path, "/tmp/tg.session");
     }
 
     #[test]
