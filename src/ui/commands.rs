@@ -365,4 +365,98 @@ mod tests {
             Command::Theme(Some("catppuccin mocha".into())),
         );
     }
+
+    #[test]
+    fn apply_set_round_trips_each_supported_key() {
+        // Every key advertised by `apply_set` should mutate the right
+        // field. Drive each one and assert the change landed.
+        let mut cfg = Config::default();
+
+        apply_set(&mut cfg, "theme", Some("tokyo-night")).unwrap();
+        assert_eq!(cfg.general.theme, "tokyo-night");
+
+        apply_set(&mut cfg, "start_maximized", Some("on")).unwrap();
+        assert!(cfg.general.start_maximized);
+        // Toggle (None) flips from current (true → false).
+        apply_set(&mut cfg, "start_maximized", None).unwrap();
+        assert!(!cfg.general.start_maximized);
+        // Revert deterministically for downstream asserts.
+        apply_set(&mut cfg, "start_maximized", Some("false")).unwrap();
+        assert!(!cfg.general.start_maximized);
+
+        apply_set(&mut cfg, "hyprland_blur", Some("true")).unwrap();
+        assert!(cfg.general.hyprland_blur);
+
+        apply_set(&mut cfg, "notifications.enabled", Some("false")).unwrap();
+        assert!(!cfg.notifications.enabled);
+
+        apply_set(&mut cfg, "notifications.dnd_per_chat", Some("true")).unwrap();
+        assert!(cfg.notifications.dnd_per_chat);
+
+        apply_set(&mut cfg, "appearance.font", Some("Inter 12")).unwrap();
+        assert_eq!(cfg.appearance.font, "Inter 12");
+
+        apply_set(&mut cfg, "appearance.message_bubbles", Some("false")).unwrap();
+        assert!(!cfg.appearance.message_bubbles);
+
+        apply_set(&mut cfg, "general.leader_key", Some(",")).unwrap();
+        assert_eq!(cfg.general.leader_key, ",");
+    }
+
+    #[test]
+    fn mutate_config_on_disk_round_trips_through_atomic_write() {
+        let tmp = tempfile::tempdir().unwrap();
+        let p = tmp.path().join("config.toml");
+        loader::save_default(&p).unwrap();
+
+        mutate_config_on_disk(&p, |cfg| {
+            apply_set(cfg, "theme", Some("gruvbox-light")).map(drop)
+        })
+        .unwrap();
+
+        let reloaded = loader::load(&p).unwrap();
+        assert_eq!(reloaded.general.theme, "gruvbox-light");
+    }
+
+    #[test]
+    fn mutate_config_on_disk_creates_file_when_missing() {
+        // load_or_default tolerates a missing file; mutate_config_on_disk
+        // should follow suit and atomically write a fresh one.
+        let tmp = tempfile::tempdir().unwrap();
+        let p = tmp.path().join("brand-new.toml");
+        assert!(!p.exists());
+
+        mutate_config_on_disk(&p, |cfg| {
+            apply_set(cfg, "theme", Some("tokyo-night")).map(drop)
+        })
+        .unwrap();
+
+        assert!(p.exists(), "mutate_config_on_disk should create the file");
+        let reloaded = loader::load(&p).unwrap();
+        assert_eq!(reloaded.general.theme, "tokyo-night");
+    }
+
+    #[test]
+    fn mutate_config_on_disk_leaves_no_stray_tmp_after_success() {
+        // Atomicity guard: tmp file must be renamed away on the happy path.
+        let tmp = tempfile::tempdir().unwrap();
+        let p = tmp.path().join("config.toml");
+        loader::save_default(&p).unwrap();
+        mutate_config_on_disk(&p, |cfg| {
+            apply_set(cfg, "appearance.font", Some("JetBrains Mono")).map(drop)
+        })
+        .unwrap();
+        let stray = p.with_file_name("config.toml.tmp");
+        assert!(!stray.exists());
+    }
+
+    #[test]
+    fn mutate_config_on_disk_propagates_mutator_errors() {
+        let tmp = tempfile::tempdir().unwrap();
+        let p = tmp.path().join("config.toml");
+        loader::save_default(&p).unwrap();
+        let res =
+            mutate_config_on_disk(&p, |cfg| apply_set(cfg, "no-such-key", Some("x")).map(drop));
+        assert!(res.is_err(), "unknown setting should bubble out");
+    }
 }
