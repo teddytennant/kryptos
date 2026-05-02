@@ -1,0 +1,22 @@
+# Rust
+/target
+**/*.rs.bk
+*.pdb
+
+# Nix
+result
+result-*
+.direnv
+.envrc
+
+# Editor / IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+.DS_Store
+
+# SigVim runtime artifacts
+*.db
+*.db-journal
+*.log
