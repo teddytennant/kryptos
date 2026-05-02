@@ -27,6 +27,9 @@ pub enum Command {
     Reload,
     Settings,
     Link(Option<String>),
+    /// Open the interactive Telegram login dialog. Always reads phone /
+    /// code / 2FA from a fresh entry; carries no args today.
+    TelegramLogin,
     Help,
     Unknown(String),
 }
@@ -63,6 +66,7 @@ pub fn parse_command(line: &str) -> Command {
                 Command::Link(Some(rest.to_string()))
             }
         }
+        "telegram-login" | "telegram" | "tg-login" => Command::TelegramLogin,
         "help" => Command::Help,
         other => Command::Unknown(other.to_string()),
     }
@@ -170,7 +174,7 @@ where
 
 /// Render the supported-commands hint shown by `:help`.
 pub fn help_text() -> &'static str {
-    ":q :w :theme <name> :set <key>[=<v>] :reload :settings :link <name> :help"
+    ":q :w :theme <name> :set <key>[=<v>] :reload :settings :link <name> :telegram-login :help"
 }
 
 /// Comma-separated list of valid theme names, for error toasts.
@@ -256,6 +260,13 @@ mod tests {
         assert_eq!(parse_command("settings"), Command::Settings);
         assert_eq!(parse_command("prefs"), Command::Settings);
         assert_eq!(parse_command("preferences"), Command::Settings);
+    }
+
+    #[test]
+    fn telegram_login_aliases() {
+        assert_eq!(parse_command("telegram-login"), Command::TelegramLogin);
+        assert_eq!(parse_command("telegram"), Command::TelegramLogin);
+        assert_eq!(parse_command("tg-login"), Command::TelegramLogin);
     }
 
     #[test]
