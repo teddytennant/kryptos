@@ -156,8 +156,7 @@ session_path = "/tmp/tg.session"
 
     #[test]
     fn parses_example_config() {
-        let cfg: Config =
-            toml::from_str(include_str!("../../config.example.toml")).unwrap();
+        let cfg: Config = toml::from_str(include_str!("../../config.example.toml")).unwrap();
         assert!(cfg.keymap.normal.contains_key("j"));
         assert!(cfg.keymap.command.contains_key("q"));
     }

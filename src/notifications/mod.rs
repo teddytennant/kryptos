@@ -12,8 +12,8 @@ use std::collections::HashMap;
 
 use notify_rust::{Hint, Notification};
 
-use crate::config::Config;
 use crate::config::schema::Notifications as NotificationConfig;
+use crate::config::Config;
 use crate::core::Result;
 
 pub use badges::BadgeState;
@@ -96,8 +96,7 @@ impl Notifier {
     }
 
     pub fn dnd_for(&mut self, conversation_id: &str, until_ms: i64) {
-        self.dnd_until
-            .insert(conversation_id.to_owned(), until_ms);
+        self.dnd_until.insert(conversation_id.to_owned(), until_ms);
     }
 
     pub fn clear_dnd(&mut self, conversation_id: &str) {
@@ -176,9 +175,10 @@ mod tests {
     use pretty_assertions::assert_eq;
 
     fn cfg_with_notifications(n: NotificationConfig) -> Config {
-        let mut c = Config::default();
-        c.notifications = n;
-        c
+        Config {
+            notifications: n,
+            ..Default::default()
+        }
     }
 
     #[test]
@@ -289,7 +289,10 @@ mod tests {
 
     #[test]
     fn action_from_key_maps_known_actions() {
-        assert_eq!(NotificationAction::from_key("default"), NotificationAction::Open);
+        assert_eq!(
+            NotificationAction::from_key("default"),
+            NotificationAction::Open
+        );
         assert_eq!(
             NotificationAction::from_key("reply"),
             NotificationAction::Reply(String::new())

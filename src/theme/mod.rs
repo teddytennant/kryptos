@@ -274,8 +274,10 @@ mod tests {
     #[test]
     fn lookup_unknown_returns_none() {
         assert!(builtin::lookup("solarized").is_none());
-        assert!(builtin::lookup("system").is_none(),
-            "'system' is special-cased outside the built-in table");
+        assert!(
+            builtin::lookup("system").is_none(),
+            "'system' is special-cased outside the built-in table"
+        );
     }
 
     #[test]
@@ -283,14 +285,22 @@ mod tests {
         let names = builtin::known_names();
         assert!(names.contains(&"system"));
         for b in builtin::ALL {
-            assert!(names.contains(&b.canonical_name), "missing {}", b.canonical_name);
+            assert!(
+                names.contains(&b.canonical_name),
+                "missing {}",
+                b.canonical_name
+            );
         }
     }
 
     #[test]
     fn every_builtin_css_is_non_empty_and_defines_palette() {
         for b in builtin::ALL {
-            assert!(!b.css.trim().is_empty(), "{} css is empty", b.canonical_name);
+            assert!(
+                !b.css.trim().is_empty(),
+                "{} css is empty",
+                b.canonical_name
+            );
             assert!(
                 b.css.contains("@define-color kryptos_bg"),
                 "{} missing @define-color kryptos_bg",

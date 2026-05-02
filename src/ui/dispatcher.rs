@@ -29,7 +29,6 @@ pub struct Dispatcher {
     pub sidebar_list: gtk::ListBox,
     pub composer: Composer,
     pub command_bar: CommandBar,
-    pub content_title: adw::WindowTitle,
     pub toast_overlay: adw::ToastOverlay,
     pub theme: Rc<RefCell<ThemeManager>>,
     pub config_path: PathBuf,
@@ -48,7 +47,6 @@ impl Dispatcher {
             sidebar_list: parts.sidebar_list.clone(),
             composer: parts.composer.clone(),
             command_bar: parts.command_bar.clone(),
-            content_title: parts.content_title.clone(),
             toast_overlay: parts.toast_overlay.clone(),
             theme,
             config_path,
@@ -248,4 +246,3 @@ fn first_label_text(widget: &gtk::Widget) -> Option<String> {
     }
     None
 }
-

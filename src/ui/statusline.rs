@@ -13,12 +13,7 @@ use gtk::prelude::*;
 
 use crate::vim::Mode;
 
-const MODE_CSS_CLASSES: &[&str] = &[
-    "mode-normal",
-    "mode-insert",
-    "mode-command",
-    "mode-search",
-];
+const MODE_CSS_CLASSES: &[&str] = &["mode-normal", "mode-insert", "mode-command", "mode-search"];
 
 #[derive(Debug, Clone)]
 pub struct ModeLine {
@@ -161,10 +156,7 @@ impl CommandBar {
         let prefix = gtk::Label::builder().label(":").build();
         prefix.add_css_class("command-bar-prefix");
 
-        let entry = gtk::Entry::builder()
-            .hexpand(true)
-            .has_frame(false)
-            .build();
+        let entry = gtk::Entry::builder().hexpand(true).has_frame(false).build();
         entry.add_css_class("command-bar-entry");
 
         let container = gtk::Box::builder()

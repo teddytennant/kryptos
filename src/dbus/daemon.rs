@@ -11,9 +11,9 @@ use std::time::{Duration, Instant};
 
 use tokio::time::sleep;
 use tracing::{info, warn};
-use zbus::Connection;
 use zbus::fdo::DBusProxy;
 use zbus::names::BusName;
+use zbus::Connection;
 
 use crate::core::{Error, Result};
 

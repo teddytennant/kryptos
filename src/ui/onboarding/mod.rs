@@ -87,9 +87,7 @@ impl LinkerWindow {
             .build();
         win.add_css_class("kryptos-linker");
 
-        let header = adw::HeaderBar::builder()
-            .show_title(false)
-            .build();
+        let header = adw::HeaderBar::builder().show_title(false).build();
         header.add_css_class("flat");
 
         // Hero copy block.
@@ -151,7 +149,7 @@ impl LinkerWindow {
         // Device name input + Generate button row.
         let name_entry = gtk::Entry::builder()
             .placeholder_text("Device name")
-            .text(&default_device_name())
+            .text(default_device_name())
             .hexpand(true)
             .build();
         name_entry.add_css_class("kryptos-linker-name");
@@ -358,7 +356,7 @@ fn spawn_link_flow(handles: LinkFlowHandles) {
                 let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
                     run_link_flow(&device_name, &tx)
                 }));
-                if let Err(_) = result {
+                if result.is_err() {
                     let _ = tx.send(LinkEvent::Error(
                         "internal error in linker worker".to_string(),
                     ));
@@ -386,19 +384,14 @@ fn spawn_link_flow(handles: LinkFlowHandles) {
                             *qr_state_for_tick.borrow_mut() = QrState::Ready(matrix);
                             qr_area_for_tick.queue_draw();
                             uri_label_for_tick.set_text(&shorten_uri(&uri));
-                            uri_label_for_tick
-                                .set_tooltip_text(Some(&uri));
-                            status_label_for_tick.set_text(
-                                "Waiting for your phone to confirm…",
-                            );
+                            uri_label_for_tick.set_tooltip_text(Some(&uri));
+                            status_label_for_tick.set_text("Waiting for your phone to confirm…");
                         }
                         Err(e) => {
                             error!(error = %e, "failed to encode QR");
                             *qr_state_for_tick.borrow_mut() = QrState::Idle;
                             qr_area_for_tick.queue_draw();
-                            status_label_for_tick.set_text(&format!(
-                                "Couldn't render QR: {e}",
-                            ));
+                            status_label_for_tick.set_text(&format!("Couldn't render QR: {e}",));
                             unlock_inputs(&generate_btn_for_tick, &name_entry_for_tick);
                             spinner_for_tick.stop();
                             spinner_for_tick.set_visible(false);
@@ -409,24 +402,20 @@ fn spawn_link_flow(handles: LinkFlowHandles) {
                     info!(%account, "linked successfully");
                     spinner_for_tick.stop();
                     spinner_for_tick.set_visible(false);
-                    status_label_for_tick.set_text(&format!(
-                        "Linked! Welcome, {account}.",
-                    ));
+                    status_label_for_tick.set_text(&format!("Linked! Welcome, {account}.",));
                     // Give the user a beat to read the success line.
                     let win = window_for_tick.clone();
-                    glib::source::timeout_add_local_once(
-                        Duration::from_millis(900),
-                        move || win.close(),
-                    );
+                    glib::source::timeout_add_local_once(Duration::from_millis(900), move || {
+                        win.close()
+                    });
                     return glib::ControlFlow::Break;
                 }
                 Ok(LinkEvent::TimedOut) => {
                     warn!("link flow timed out");
                     spinner_for_tick.stop();
                     spinner_for_tick.set_visible(false);
-                    status_label_for_tick.set_text(
-                        "Timed out waiting for your phone. Try generating a new code.",
-                    );
+                    status_label_for_tick
+                        .set_text("Timed out waiting for your phone. Try generating a new code.");
                     unlock_inputs(&generate_btn_for_tick, &name_entry_for_tick);
                     return glib::ControlFlow::Break;
                 }
@@ -570,12 +559,7 @@ fn build_qr(uri: &str) -> Result<QrMatrix> {
     })
 }
 
-fn draw_qr(
-    cr: &gtk::cairo::Context,
-    width: i32,
-    height: i32,
-    state: &QrState,
-) {
+fn draw_qr(cr: &gtk::cairo::Context, width: i32, height: i32, state: &QrState) {
     let w = width as f64;
     let h = height as f64;
 

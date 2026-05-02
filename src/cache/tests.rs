@@ -31,10 +31,19 @@ fn msg(conv: &str, ts: i64, sender: &str, body: &str) -> Message {
 async fn list_conversations_orders_by_last_message_ts_desc_nulls_last() {
     let cache = Cache::open_in_memory().await.unwrap();
 
-    cache.upsert_conversation(&convo("a", Some(100))).await.unwrap();
-    cache.upsert_conversation(&convo("b", Some(300))).await.unwrap();
+    cache
+        .upsert_conversation(&convo("a", Some(100)))
+        .await
+        .unwrap();
+    cache
+        .upsert_conversation(&convo("b", Some(300)))
+        .await
+        .unwrap();
     cache.upsert_conversation(&convo("c", None)).await.unwrap();
-    cache.upsert_conversation(&convo("d", Some(200))).await.unwrap();
+    cache
+        .upsert_conversation(&convo("d", Some(200)))
+        .await
+        .unwrap();
 
     let got: Vec<_> = cache
         .list_conversations()
@@ -51,17 +60,26 @@ async fn insert_message_updates_conversation_last_message_ts() {
     let cache = Cache::open_in_memory().await.unwrap();
     cache.upsert_conversation(&convo("x", None)).await.unwrap();
 
-    cache.insert_message(&msg("x", 1000, "+15551112222", "hi")).await.unwrap();
+    cache
+        .insert_message(&msg("x", 1000, "+15551112222", "hi"))
+        .await
+        .unwrap();
     let listed = cache.list_conversations().await.unwrap();
     assert_eq!(listed[0].last_message_ts, Some(1000));
 
     // Newer message bumps it.
-    cache.insert_message(&msg("x", 2000, "+15551112222", "hello")).await.unwrap();
+    cache
+        .insert_message(&msg("x", 2000, "+15551112222", "hello"))
+        .await
+        .unwrap();
     let listed = cache.list_conversations().await.unwrap();
     assert_eq!(listed[0].last_message_ts, Some(2000));
 
     // Older message does NOT regress it.
-    cache.insert_message(&msg("x", 500, "+15551112222", "old")).await.unwrap();
+    cache
+        .insert_message(&msg("x", 500, "+15551112222", "old"))
+        .await
+        .unwrap();
     let listed = cache.list_conversations().await.unwrap();
     assert_eq!(listed[0].last_message_ts, Some(2000));
 }
@@ -98,7 +116,10 @@ async fn contact_roundtrip() {
         blocked: false,
     };
     cache.upsert_contact(&c).await.unwrap();
-    assert_eq!(cache.get_contact("+15550000000").await.unwrap(), Some(c.clone()));
+    assert_eq!(
+        cache.get_contact("+15550000000").await.unwrap(),
+        Some(c.clone())
+    );
 
     let updated = Contact { blocked: true, ..c };
     cache.upsert_contact(&updated).await.unwrap();

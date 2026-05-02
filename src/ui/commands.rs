@@ -5,7 +5,7 @@
 //! widgets / disk / D-Bus and surfaces feedback through
 //! `adw::ToastOverlay`.
 
-use std::path::PathBuf;
+use std::path::Path;
 
 use crate::config::{loader, Config};
 use crate::core::{Error, Result};
@@ -94,7 +94,11 @@ fn parse_set(rest: &str) -> Command {
 
 /// Apply a `:set key [= value]` to a `Config` in-place. Pure so tests
 /// can verify field updates without disk / GTK.
-pub fn apply_set(cfg: &mut Config, key: &str, value: Option<&str>) -> std::result::Result<String, String> {
+pub fn apply_set(
+    cfg: &mut Config,
+    key: &str,
+    value: Option<&str>,
+) -> std::result::Result<String, String> {
     match key {
         "theme" => {
             let v = value.ok_or_else(|| "`:set theme = <name>` requires a value".to_string())?;
@@ -154,7 +158,7 @@ fn parse_bool_set(value: Option<&str>, current: bool) -> std::result::Result<boo
 }
 
 /// Read config, mutate, and atomically rewrite. Used by `:set`.
-pub fn mutate_config_on_disk<F>(path: &PathBuf, mutate: F) -> Result<()>
+pub fn mutate_config_on_disk<F>(path: &Path, mutate: F) -> Result<()>
 where
     F: FnOnce(&mut Config) -> std::result::Result<(), String>,
 {
@@ -194,7 +198,10 @@ mod tests {
 
     #[test]
     fn unknown_command_carries_head() {
-        assert_eq!(parse_command("doesnotexist"), Command::Unknown("doesnotexist".into()));
+        assert_eq!(
+            parse_command("doesnotexist"),
+            Command::Unknown("doesnotexist".into())
+        );
         assert_eq!(parse_command("foo bar baz"), Command::Unknown("foo".into()));
     }
 
@@ -310,5 +317,52 @@ mod tests {
     fn apply_set_bool_rejects_garbage() {
         let mut cfg = Config::default();
         assert!(apply_set(&mut cfg, "start_maximized", Some("maybe")).is_err());
+    }
+
+    #[test]
+    fn parse_command_handles_tabs_and_mixed_whitespace() {
+        // Tabs split head from args just like spaces.
+        assert_eq!(
+            parse_command("theme\tgruvbox"),
+            Command::Theme(Some("gruvbox".into()))
+        );
+        // Leading whitespace + tab + trailing whitespace is fine.
+        assert_eq!(
+            parse_command("\t  set\t theme = gruvbox  "),
+            Command::Set {
+                key: "theme".into(),
+                value: Some("gruvbox".into()),
+            }
+        );
+    }
+
+    #[test]
+    fn parse_command_is_case_sensitive() {
+        // We don't lower-case command heads, so capitalised aliases land
+        // in Unknown — make sure that's deliberate, not accidental.
+        assert_eq!(parse_command("Q"), Command::Unknown("Q".into()));
+        assert_eq!(parse_command("Theme"), Command::Unknown("Theme".into()));
+    }
+
+    #[test]
+    fn parse_command_set_keeps_first_equals_only() {
+        // `:set` splits on the FIRST `=`, so values can themselves contain `=`.
+        assert_eq!(
+            parse_command("set keymap=foo=bar=baz"),
+            Command::Set {
+                key: "keymap".into(),
+                value: Some("foo=bar=baz".into()),
+            }
+        );
+    }
+
+    #[test]
+    fn parse_command_theme_keeps_inner_whitespace() {
+        // Multi-word theme arg — splitn(2) means we keep the rest verbatim
+        // (after a single trim), not collapse to a single token.
+        assert_eq!(
+            parse_command("theme catppuccin mocha"),
+            Command::Theme(Some("catppuccin mocha".into())),
+        );
     }
 }

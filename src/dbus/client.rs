@@ -87,12 +87,7 @@ impl SignalClient {
 
     /// Send a plain-text message to a single recipient (E.164 or UUID).
     /// Returns the timestamp signal-cli assigned to the message.
-    pub async fn send_text(
-        &self,
-        account: &str,
-        recipient: &str,
-        message: &str,
-    ) -> Result<i64> {
+    pub async fn send_text(&self, account: &str, recipient: &str, message: &str) -> Result<i64> {
         validate_recipient(recipient)?;
         let proxy = self.account(account).await?;
         debug!(%account, %recipient, len = message.len(), "send_text");
@@ -182,7 +177,11 @@ fn validate_verify_code(s: &str) -> Result<()> {
             "invalid verification code {s:?}: expected 6 digits"
         )));
     }
-    if stripped.len() != s.chars().filter(|c| !c.is_ascii_whitespace() && *c != '-').count() {
+    if stripped.len()
+        != s.chars()
+            .filter(|c| !c.is_ascii_whitespace() && *c != '-')
+            .count()
+    {
         return Err(Error::Config(format!(
             "invalid verification code {s:?}: only digits, spaces, and hyphens allowed"
         )));
@@ -214,12 +213,8 @@ pub(crate) fn validate_group_id(id: &[u8]) -> Result<()> {
 }
 
 fn validate_attachment_path(p: &Path) -> Result<()> {
-    let meta = std::fs::metadata(p).map_err(|e| {
-        Error::Config(format!(
-            "attachment {}: {e}",
-            p.display()
-        ))
-    })?;
+    let meta = std::fs::metadata(p)
+        .map_err(|e| Error::Config(format!("attachment {}: {e}", p.display())))?;
     if !meta.is_file() {
         return Err(Error::Config(format!(
             "attachment {} is not a regular file",
@@ -227,9 +222,8 @@ fn validate_attachment_path(p: &Path) -> Result<()> {
         )));
     }
     // Probe readability — metadata alone doesn't guarantee read permission.
-    std::fs::File::open(p).map_err(|e| {
-        Error::Config(format!("attachment {} not readable: {e}", p.display()))
-    })?;
+    std::fs::File::open(p)
+        .map_err(|e| Error::Config(format!("attachment {} not readable: {e}", p.display())))?;
     Ok(())
 }
 
@@ -252,9 +246,42 @@ mod tests {
 
     #[test]
     fn account_path_strips_plus_and_formatting() {
-        assert_eq!(account_object_path("+14155552671"), "/org/asamk/Signal/_14155552671");
-        assert_eq!(account_object_path("14155552671"), "/org/asamk/Signal/_14155552671");
-        assert_eq!(account_object_path("+1 (415) 555-2671"), "/org/asamk/Signal/_14155552671");
+        assert_eq!(
+            account_object_path("+14155552671"),
+            "/org/asamk/Signal/_14155552671"
+        );
+        assert_eq!(
+            account_object_path("14155552671"),
+            "/org/asamk/Signal/_14155552671"
+        );
+        assert_eq!(
+            account_object_path("+1 (415) 555-2671"),
+            "/org/asamk/Signal/_14155552671"
+        );
+    }
+
+    #[test]
+    fn account_from_object_path_round_trips() {
+        // The canonical path produced by `account_object_path` decodes back
+        // to a `+`-prefixed E.164 number.
+        let canonical = account_object_path("+14155552671");
+        assert_eq!(
+            account_from_object_path(&canonical),
+            Some("+14155552671".into())
+        );
+        // Tolerates a `+` after `_` (newer signal-cli might emit either).
+        assert_eq!(
+            account_from_object_path("/org/asamk/Signal/_+14155552671"),
+            Some("+14155552671".into())
+        );
+        // Non-account paths return None instead of producing a bogus number.
+        assert_eq!(account_from_object_path("/"), None);
+        assert_eq!(account_from_object_path(""), None);
+        assert_eq!(account_from_object_path("/org/asamk/Signal/_"), None);
+        assert_eq!(
+            account_from_object_path("/org/asamk/Signal/notanumber"),
+            None
+        );
     }
 
     #[test]
@@ -263,7 +290,10 @@ mod tests {
         assert!(validate_phone_number("14155552671").is_err(), "missing +");
         assert!(validate_phone_number("+1abcd").is_err(), "non-digits");
         assert!(validate_phone_number("+1").is_err(), "too short");
-        assert!(validate_phone_number(&format!("+{}", "9".repeat(20))).is_err(), "too long");
+        assert!(
+            validate_phone_number(&format!("+{}", "9".repeat(20))).is_err(),
+            "too long"
+        );
     }
 
     #[test]
@@ -287,7 +317,10 @@ mod tests {
     #[test]
     fn recipient_accepts_e164() {
         assert!(validate_recipient("+14155552671").is_ok());
-        assert!(validate_recipient("  +14155552671  ").is_ok(), "leading/trailing ws");
+        assert!(
+            validate_recipient("  +14155552671  ").is_ok(),
+            "leading/trailing ws"
+        );
     }
 
     #[test]
@@ -304,7 +337,10 @@ mod tests {
     fn recipient_rejects_garbage() {
         assert!(validate_recipient("").is_err(), "empty");
         assert!(validate_recipient("not-a-recipient").is_err(), "non-hex");
-        assert!(validate_recipient("14155552671").is_err(), "phone without +");
+        assert!(
+            validate_recipient("14155552671").is_err(),
+            "phone without +"
+        );
         assert!(
             validate_recipient("550e8400-e29b-41d4-a716-44665544000").is_err(),
             "uuid one digit short"
