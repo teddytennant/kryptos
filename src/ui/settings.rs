@@ -93,7 +93,7 @@ fn appearance_page(cfg: &Config, writer: Rc<DebouncedWriter>) -> adw::Preference
         combo.set_selected(idx as u32);
     }
     let writer_combo = writer.clone();
-    let names_owned: Vec<String> = names.iter().map(|s| s.to_string()).collect();
+    let names_owned: Vec<String> = names.iter().map(std::string::ToString::to_string).collect();
     combo.connect_selected_notify(move |row| {
         let idx = row.selected() as usize;
         if let Some(name) = names_owned.get(idx).cloned() {
@@ -412,7 +412,7 @@ pub fn write_config_atomic(path: &Path, cfg: &Config) -> Result<()> {
 fn tmp_path(path: &Path) -> PathBuf {
     let mut name = path
         .file_name()
-        .map(|n| n.to_os_string())
+        .map(std::ffi::OsStr::to_os_string)
         .unwrap_or_else(|| std::ffi::OsString::from("config.toml"));
     name.push(".tmp");
     path.with_file_name(name)

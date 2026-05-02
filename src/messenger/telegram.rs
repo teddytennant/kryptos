@@ -82,8 +82,7 @@ impl TelegramBackend {
     pub async fn login(api_id: i32, api_hash: &str, session_path: &Path) -> Result<Self> {
         warn!(
             ?session_path,
-            api_id,
-            "TelegramBackend::login is not yet implemented (grammers-client pending)"
+            api_id, "TelegramBackend::login is not yet implemented (grammers-client pending)"
         );
         let _ = api_hash;
         Err(Error::Config(
@@ -126,9 +125,7 @@ impl MessengerBackend for TelegramBackend {
     }
 
     async fn list_conversations(&self) -> Result<Vec<ConversationSummary>> {
-        Err(Error::Config(
-            "telegram backend not yet implemented".into(),
-        ))
+        Err(Error::Config("telegram backend not yet implemented".into()))
     }
 
     async fn fetch_history(
@@ -137,9 +134,7 @@ impl MessengerBackend for TelegramBackend {
         _limit: u32,
         _before_ts: Option<i64>,
     ) -> Result<Vec<NormalizedMessage>> {
-        Err(Error::Config(
-            "telegram backend not yet implemented".into(),
-        ))
+        Err(Error::Config("telegram backend not yet implemented".into()))
     }
 
     async fn send_message(
@@ -148,21 +143,15 @@ impl MessengerBackend for TelegramBackend {
         _body: &str,
         _attachments: &[PathBuf],
     ) -> Result<i64> {
-        Err(Error::Config(
-            "telegram backend not yet implemented".into(),
-        ))
+        Err(Error::Config("telegram backend not yet implemented".into()))
     }
 
     async fn mark_read(&self, _id: &ChatId) -> Result<()> {
-        Err(Error::Config(
-            "telegram backend not yet implemented".into(),
-        ))
+        Err(Error::Config("telegram backend not yet implemented".into()))
     }
 
     async fn typing(&self, _id: &ChatId, _on: bool) -> Result<()> {
-        Err(Error::Config(
-            "telegram backend not yet implemented".into(),
-        ))
+        Err(Error::Config("telegram backend not yet implemented".into()))
     }
 
     async fn subscribe(&self) -> Result<mpsc::UnboundedReceiver<Event>> {
@@ -207,11 +196,7 @@ mod tests {
     async fn stub_send_errors_until_implemented() {
         let b = TelegramBackend::new(cfg());
         let err = b
-            .send_message(
-                &ChatId::new(Backend::Telegram, "1"),
-                "hi",
-                &[],
-            )
+            .send_message(&ChatId::new(Backend::Telegram, "1"), "hi", &[])
             .await
             .unwrap_err();
         assert!(format!("{err}").contains("not yet implemented"));

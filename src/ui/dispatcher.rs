@@ -178,7 +178,7 @@ impl Dispatcher {
             return;
         }
         let key_owned = key.to_string();
-        let value_owned = value.map(|s| s.to_string());
+        let value_owned = value.map(std::string::ToString::to_string);
         let result = mutate_config_on_disk(&self.config_path, |cfg| {
             apply_set(cfg, &key_owned, value_owned.as_deref()).map(|_| ())
         });
