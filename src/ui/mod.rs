@@ -8,6 +8,7 @@
 //! - [`dispatcher`]  — apply [`crate::vim::Action`]s to the widget tree.
 //! - [`settings`]    — `adw::PreferencesWindow` over `~/.config/kryptos/config.toml`.
 
+mod commands;
 mod composer;
 mod dispatcher;
 mod input;
@@ -20,9 +21,10 @@ use std::rc::Rc;
 
 use adw::prelude::*;
 use gtk::glib;
-use tracing::{error, info};
+use tracing::{error, info, warn};
 
 use crate::config::{loader, Config};
+use crate::theme::ThemeManager;
 use crate::vim::{Engine, KeymapSet, KeySym, Mode, Outcome};
 
 use dispatcher::Dispatcher;
@@ -43,7 +45,14 @@ pub fn run() -> glib::ExitCode {
 fn activate(app: &adw::Application) {
     info!("activating main window");
 
-    let cfg = match loader::default_path().and_then(|p| loader::load_or_default(&p)) {
+    let config_path = match loader::default_path() {
+        Ok(p) => p,
+        Err(e) => {
+            error!(error = %e, "could not resolve config path");
+            return;
+        }
+    };
+    let cfg = match loader::load_or_default(&config_path) {
         Ok(c) => c,
         Err(e) => {
             error!(error = %e, "config load failed; falling back to defaults");
@@ -53,6 +62,28 @@ fn activate(app: &adw::Application) {
 
     let parts = window::build(app, &cfg);
 
+    // Install theme stack against the default display and apply the
+    // configured theme. Failures to apply log + fall through with the
+    // built-in provider unloaded (libadwaita defaults).
+    let theme = match gtk::gdk::Display::default() {
+        Some(display) => {
+            let mut tm = ThemeManager::install_for_display(&display);
+            if let Err(e) = tm.apply(&cfg.general.theme) {
+                warn!(error = %e, "initial theme apply failed");
+            }
+            tm
+        }
+        None => {
+            error!("no default display; theme manager disabled");
+            // We still need *something*; install_for_display panics
+            // without a display anyway, so fall back to a placeholder
+            // by creating one against any available display we can find.
+            // In practice activate() always runs with a display available.
+            return;
+        }
+    };
+    let theme = Rc::new(RefCell::new(theme));
+
     let engine = match KeymapSet::from_config(&cfg) {
         Ok(set) => Engine::new(set),
         Err(e) => {
@@ -61,7 +92,7 @@ fn activate(app: &adw::Application) {
         }
     };
     let engine = Rc::new(RefCell::new(engine));
-    let dispatcher = Dispatcher::from_parts(&parts);
+    let dispatcher = Dispatcher::new(&parts, theme.clone(), config_path.clone());
 
     // Composer-local Enter: when the user hits Enter in the composer
     // itself (Normal or Insert), the composer's own controller fires
@@ -108,13 +139,19 @@ fn wire_command_bar(
         mode_line.set_mode(Mode::Normal);
     });
 
-    // Esc inside the entry — cancel and return to Normal.
+    // Esc inside the entry — cancel and return to Normal. In Search
+    // mode we also drop the active filter so the sidebar is whole again.
     let esc = gtk::EventControllerKey::new();
     let bar_esc = parts.command_bar.clone();
     let mode_line_esc = parts.mode_line.clone();
     let engine_esc = engine.clone();
+    let dispatcher_esc = dispatcher.clone();
     esc.connect_key_pressed(move |_, keyval, _, _| {
         if keyval == gtk::gdk::Key::Escape {
+            let mode_before = engine_esc.borrow().mode();
+            if mode_before == Mode::Search {
+                dispatcher_esc.clear_search();
+            }
             bar_esc.hide();
             engine_esc.borrow_mut().set_mode(Mode::Normal);
             mode_line_esc.set_mode(Mode::Normal);

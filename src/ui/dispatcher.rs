@@ -1,13 +1,25 @@
 //! Glue between `vim::Action` and the GTK widget tree. The dispatcher
-//! holds weak-ish (clone of) handles to widgets and is invoked whenever
-//! the [`Engine`](crate::vim::Engine) emits an action.
+//! holds clones of widget handles and is invoked whenever the
+//! [`Engine`](crate::vim::Engine) emits an action. It also runs
+//! `:command` lines and `/search` queries.
+
+use std::cell::RefCell;
+use std::path::PathBuf;
+use std::rc::Rc;
 
 use adw::prelude::*;
-use tracing::{debug, info};
+use tracing::{debug, error, info, warn};
 
+use crate::config::loader;
+use crate::dbus::SignalClient;
+use crate::theme::ThemeManager;
 use crate::vim::{Action, Mode};
 
+use super::commands::{
+    apply_set, help_text, mutate_config_on_disk, parse_command, theme_names_csv, Command,
+};
 use super::composer::{Composer, ComposerMode};
+use super::settings::Settings;
 use super::statusline::CommandBar;
 use super::window::{move_sidebar_selection, WindowParts};
 
@@ -18,17 +30,32 @@ pub struct Dispatcher {
     pub composer: Composer,
     pub command_bar: CommandBar,
     pub content_title: adw::WindowTitle,
+    pub toast_overlay: adw::ToastOverlay,
+    pub theme: Rc<RefCell<ThemeManager>>,
+    pub config_path: PathBuf,
+    /// Active substring filter for the sidebar (`/search`). Empty = no filter.
+    search_filter: Rc<RefCell<String>>,
 }
 
 impl Dispatcher {
-    pub fn from_parts(parts: &WindowParts) -> Self {
-        Self {
+    pub fn new(
+        parts: &WindowParts,
+        theme: Rc<RefCell<ThemeManager>>,
+        config_path: PathBuf,
+    ) -> Self {
+        let me = Self {
             window: parts.window.clone(),
             sidebar_list: parts.sidebar_list.clone(),
             composer: parts.composer.clone(),
             command_bar: parts.command_bar.clone(),
             content_title: parts.content_title.clone(),
-        }
+            toast_overlay: parts.toast_overlay.clone(),
+            theme,
+            config_path,
+            search_filter: Rc::new(RefCell::new(String::new())),
+        };
+        me.install_sidebar_filter();
+        me
     }
 
     /// Returns the new [`Mode`] the engine should be in afterwards, or
@@ -77,11 +104,13 @@ impl Dispatcher {
                 None
             }
             Action::SetTheme => {
-                info!("set_theme action — TODO");
+                // The keymap-level :theme entry without args isn't useful
+                // yet — surface a hint and the valid set of names.
+                self.toast_info(&format!("themes: {}", theme_names_csv()));
                 None
             }
             Action::ReloadConfig => {
-                info!("reload_config action — TODO");
+                self.reload_config();
                 None
             }
             other => {
@@ -91,32 +120,188 @@ impl Dispatcher {
         }
     }
 
-    /// Run a `:command` line. For v1 we recognise `:q`, `:quit`, and
-    /// `:theme <name>`.
+    /// Run a `:command` line.
     pub fn run_command(&self, line: &str) {
-        let line = line.trim();
-        if line.is_empty() {
-            return;
-        }
-        let mut parts = line.split_whitespace();
-        let head = parts.next().unwrap_or("");
-        match head {
-            "q" | "quit" => self.window.close(),
-            "theme" => {
-                let name = parts.next().unwrap_or("");
-                if name.is_empty() {
-                    info!("`:theme` with no argument — TODO list themes");
-                } else {
-                    info!(theme = %name, "theme change (placeholder)");
-                    self.content_title.set_subtitle(&format!("theme: {name}"));
-                }
+        let cmd = parse_command(line);
+        debug!(?cmd, "run_command");
+        match cmd {
+            Command::Empty => {}
+            Command::Quit => self.window.close(),
+            Command::Write => {
+                // TODO: route through composer-send once we have a real Signal session.
+                info!(":w — TODO send composer");
+                self.toast_info(":w — send not yet wired");
             }
-            "reload" => info!("reload — TODO"),
-            other => info!(cmd = %other, "unknown command"),
+            Command::Theme(None) => {
+                self.toast_info(&format!("themes: {}", theme_names_csv()));
+            }
+            Command::Theme(Some(name)) => match self.theme.borrow_mut().apply(&name) {
+                Ok(()) => self.toast_info(&format!("theme: {name}")),
+                Err(e) => self.toast_error(&format!("{e}")),
+            },
+            Command::Set { key, value } => self.apply_set_to_disk(&key, value.as_deref()),
+            Command::Reload => self.reload_config(),
+            Command::Settings => Settings::open(&self.window),
+            Command::Link(None) => self.toast_error(":link requires a device name"),
+            Command::Link(Some(name)) => self.run_link(name),
+            Command::Help => self.toast_info(help_text()),
+            Command::Unknown(head) => self.toast_error(&format!("unknown command: :{head}")),
         }
     }
 
+    /// Run a `/search` query — substring-filter the sidebar list.
+    /// Empty input clears the filter.
     pub fn run_search(&self, line: &str) {
-        info!(query = %line.trim(), "search (placeholder)");
+        let q = line.trim().to_string();
+        info!(query = %q, "search");
+        *self.search_filter.borrow_mut() = q;
+        self.sidebar_list.invalidate_filter();
+    }
+
+    /// Esc on the command bar in Search mode should clear the filter,
+    /// not just close the bar. The window-level wiring calls this.
+    pub fn clear_search(&self) {
+        self.search_filter.borrow_mut().clear();
+        self.sidebar_list.invalidate_filter();
+    }
+
+    // -----------------------------------------------------------------------
+    // Internals
+    // -----------------------------------------------------------------------
+
+    fn install_sidebar_filter(&self) {
+        let filter = self.search_filter.clone();
+        self.sidebar_list
+            .set_filter_func(move |row| row_matches(row, &filter.borrow()));
+    }
+
+    fn apply_set_to_disk(&self, key: &str, value: Option<&str>) {
+        if key.is_empty() {
+            self.toast_error(":set requires a key");
+            return;
+        }
+        let key_owned = key.to_string();
+        let value_owned = value.map(|s| s.to_string());
+        let result = mutate_config_on_disk(&self.config_path, |cfg| {
+            apply_set(cfg, &key_owned, value_owned.as_deref()).map(|_| ())
+        });
+        match result {
+            Ok(()) => self.toast_info(&format!("{key} updated")),
+            Err(e) => self.toast_error(&format!("{e}")),
+        }
+    }
+
+    fn reload_config(&self) {
+        let cfg = match loader::load_or_default(&self.config_path) {
+            Ok(c) => c,
+            Err(e) => {
+                error!(error = %e, "reload: load failed");
+                self.toast_error(&format!("reload: {e}"));
+                return;
+            }
+        };
+        match self.theme.borrow_mut().apply(&cfg.general.theme) {
+            Ok(()) => self.toast_info(&format!("reloaded — theme {}", cfg.general.theme)),
+            Err(e) => self.toast_error(&format!("theme: {e}")),
+        }
+    }
+
+    /// `:link <name>` — call signal-cli's link method on a worker
+    /// thread (it spins up its own current-thread runtime), then post
+    /// the resulting URI back as a toast on the GTK main loop.
+    fn run_link(&self, name: String) {
+        let toast_overlay = self.toast_overlay.clone();
+        let (tx, rx) = std::sync::mpsc::channel::<Result<String, String>>();
+        let spawn_result = std::thread::Builder::new()
+            .name("kryptos-link".into())
+            .spawn(move || {
+                let res = (|| {
+                    let rt = tokio::runtime::Builder::new_current_thread()
+                        .enable_all()
+                        .build()
+                        .map_err(|e| format!("runtime: {e}"))?;
+                    rt.block_on(async {
+                        let client = SignalClient::connect()
+                            .await
+                            .map_err(|e| format!("{e}"))?;
+                        client.link(&name).await.map_err(|e| format!("{e}"))
+                    })
+                })();
+                let _ = tx.send(res);
+            });
+        if let Err(e) = spawn_result {
+            warn!(error = %e, "link: thread spawn failed");
+            self.toast_error(&format!("link: {e}"));
+            return;
+        }
+
+        glib::source::timeout_add_local(std::time::Duration::from_millis(150), move || {
+            match rx.try_recv() {
+                Ok(Ok(uri)) => {
+                    info!(%uri, "link URI");
+                    let toast = adw::Toast::builder()
+                        .title(&format!("link: {uri}"))
+                        .timeout(0) // sticky — the URI is long; let the user dismiss.
+                        .build();
+                    toast_overlay.add_toast(toast);
+                    glib::ControlFlow::Break
+                }
+                Ok(Err(e)) => {
+                    warn!(error = %e, "link failed");
+                    let toast = adw::Toast::builder()
+                        .title(&format!("link failed: {e}"))
+                        .build();
+                    toast_overlay.add_toast(toast);
+                    glib::ControlFlow::Break
+                }
+                Err(std::sync::mpsc::TryRecvError::Empty) => glib::ControlFlow::Continue,
+                Err(std::sync::mpsc::TryRecvError::Disconnected) => glib::ControlFlow::Break,
+            }
+        });
+    }
+
+    fn toast_info(&self, msg: &str) {
+        let toast = adw::Toast::builder().title(msg).timeout(3).build();
+        self.toast_overlay.add_toast(toast);
+    }
+
+    fn toast_error(&self, msg: &str) {
+        let toast = adw::Toast::builder()
+            .title(msg)
+            .timeout(5)
+            .priority(adw::ToastPriority::High)
+            .build();
+        self.toast_overlay.add_toast(toast);
     }
 }
+
+/// Walk a `ListBoxRow`'s subtree for a `gtk::Label` and check if its
+/// text contains `needle` (case-insensitive). v1: just match the first
+/// label (the row's title). Empty `needle` ⇒ all rows pass.
+fn row_matches(row: &gtk::ListBoxRow, needle: &str) -> bool {
+    if needle.is_empty() {
+        return true;
+    }
+    let needle_lc = needle.to_ascii_lowercase();
+    if let Some(text) = first_label_text(row.upcast_ref::<gtk::Widget>()) {
+        return text.to_ascii_lowercase().contains(&needle_lc);
+    }
+    true
+}
+
+/// Depth-first scan for the first `gtk::Label` descendant.
+fn first_label_text(widget: &gtk::Widget) -> Option<String> {
+    if let Some(label) = widget.downcast_ref::<gtk::Label>() {
+        return Some(label.text().to_string());
+    }
+    let mut child = widget.first_child();
+    while let Some(c) = child {
+        if let Some(found) = first_label_text(&c) {
+            return Some(found);
+        }
+        child = c.next_sibling();
+    }
+    None
+}
+
+use gtk::glib;
