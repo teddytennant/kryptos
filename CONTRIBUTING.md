@@ -58,8 +58,6 @@ description.
 
 ## Commits and PRs
 
-- Atomic commits. One logical change per commit, buildable at every
-  step.
 - [Conventional Commits](https://www.conventionalcommits.org/) format:
   `feat(vim): …`, `fix(dbus): …`, `refactor(ui): …`, `chore: …`.
 - Rebase, don't merge. Force-push your own branch as needed.
