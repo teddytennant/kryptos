@@ -1,20 +1,31 @@
-//! Theme system: built-in palettes (Catppuccin, Gruvbox, Tokyo Night) plus
-//! a drop-in user `custom.css`.
+//! Theme system: built-in palettes (Catppuccin, Gruvbox, Tokyo Night),
+//! optional user `custom.css`, and live hot-reload.
 //!
 //! Two `gtk::CssProvider`s are registered against the default `gdk::Display`:
 //!
 //! 1. A "built-in" provider holding the active embedded theme.
 //! 2. A "custom" provider holding `~/.config/kryptos/custom.css`, if present.
-//!    Because it is added at a higher priority, it wins style conflicts —
-//!    exactly what a user wants when they drop in overrides.
+//!    Because it is added second, it wins style conflicts — exactly what a
+//!    user wants when they drop in overrides.
+//!
+//! The custom-CSS watcher uses `notify` (already a workspace dep), debounces
+//! events ~150ms to coalesce editor-save bursts, and reapplies on the GTK
+//! main thread via `glib::idle_add_once`.
 
 pub mod builtin;
 
+use std::path::PathBuf;
+use std::sync::mpsc::{channel as std_channel, Receiver as StdReceiver};
+use std::time::Duration;
+
 use gtk::gdk;
 use gtk::{CssProvider, STYLE_PROVIDER_PRIORITY_APPLICATION};
+use notify::{Event, EventKind, RecommendedWatcher, RecursiveMode, Watcher};
 use tracing::{debug, info, warn};
 
 use crate::core::{Error, Result};
+
+const CUSTOM_DEBOUNCE: Duration = Duration::from_millis(150);
 
 pub struct ThemeManager {
     display: gdk::Display,
@@ -26,7 +37,7 @@ pub struct ThemeManager {
 impl ThemeManager {
     /// Build a manager and register its built-in `CssProvider` against the
     /// given display at `STYLE_PROVIDER_PRIORITY_APPLICATION`. The custom
-    /// provider is added lazily by [`Self::reload_custom_css`].
+    /// provider is added lazily by [`reload_custom_css`].
     pub fn install_for_display(display: &gdk::Display) -> Self {
         let builtin_provider = CssProvider::new();
         gtk::style_context_add_provider_for_display(
@@ -111,6 +122,138 @@ impl ThemeManager {
     }
 }
 
+/// Spawn a background notify-watcher for `custom_css_path`. On each save
+/// (debounced ~150ms) the supplied `on_change` closure runs on the GTK main
+/// thread, where it can safely touch `ThemeManager`.
+///
+/// We watch the parent directory rather than the file itself because most
+/// editors atomic-rename on save and a watch on the file would miss the
+/// replacement.
+pub fn start_watching<F>(custom_css_path: PathBuf, mut on_change: F) -> Result<WatchHandle>
+where
+    F: FnMut(&std::path::Path) + 'static,
+{
+    let (raw_tx, raw_rx): (_, StdReceiver<notify::Result<Event>>) = std_channel();
+    let mut watcher: RecommendedWatcher = Watcher::new(
+        raw_tx,
+        notify::Config::default().with_poll_interval(Duration::from_secs(2)),
+    )
+    .map_err(|e| Error::Config(format!("css watcher: {e}")))?;
+
+    let watch_dir = custom_css_path
+        .parent()
+        .map(|p| p.to_path_buf())
+        .unwrap_or_else(|| PathBuf::from("."));
+    if !watch_dir.exists() {
+        std::fs::create_dir_all(&watch_dir)?;
+    }
+    watcher
+        .watch(&watch_dir, RecursiveMode::NonRecursive)
+        .map_err(|e| Error::Config(format!("watch {watch_dir:?}: {e}")))?;
+
+    let (main_tx, main_rx) = async_channel_shim::unbounded::<()>();
+
+    let target = custom_css_path.clone();
+    let thread = std::thread::Builder::new()
+        .name("kryptos-theme-watcher".into())
+        .spawn(move || worker(raw_rx, target, main_tx))
+        .map_err(|e| Error::Config(format!("spawn theme watcher: {e}")))?;
+
+    // Poll the inbox on the GTK main loop. 100ms is well below human-noticeable
+    // latency and cheap (one mpsc try_recv per tick when idle).
+    let path_for_cb = custom_css_path.clone();
+    let source_id = glib::source::timeout_add_local(Duration::from_millis(100), move || {
+        let mut fired = false;
+        while main_rx.try_recv().is_ok() {
+            fired = true;
+        }
+        if fired {
+            on_change(&path_for_cb);
+        }
+        glib::ControlFlow::Continue
+    });
+
+    Ok(WatchHandle {
+        _watcher: watcher,
+        _thread: thread,
+        source_id: Some(source_id),
+    })
+}
+
+pub struct WatchHandle {
+    _watcher: RecommendedWatcher,
+    _thread: std::thread::JoinHandle<()>,
+    source_id: Option<glib::SourceId>,
+}
+
+impl Drop for WatchHandle {
+    fn drop(&mut self) {
+        if let Some(id) = self.source_id.take() {
+            id.remove();
+        }
+    }
+}
+
+fn worker(
+    raw_rx: StdReceiver<notify::Result<Event>>,
+    target: PathBuf,
+    main_tx: async_channel_shim::Sender<()>,
+) {
+    while let Ok(first) = raw_rx.recv() {
+        if !is_relevant(&first, &target) {
+            continue;
+        }
+        std::thread::sleep(CUSTOM_DEBOUNCE);
+        while raw_rx.try_recv().is_ok() {}
+        if main_tx.send(()).is_err() {
+            return;
+        }
+    }
+}
+
+fn is_relevant(ev: &notify::Result<Event>, target: &PathBuf) -> bool {
+    match ev {
+        Ok(event) => {
+            let kind_ok = matches!(
+                event.kind,
+                EventKind::Modify(_) | EventKind::Create(_) | EventKind::Remove(_)
+            );
+            let path_ok = event.paths.iter().any(|p| p == target);
+            kind_ok && path_ok
+        }
+        Err(_) => false,
+    }
+}
+
+// Tiny non-blocking channel built on `std::sync::mpsc`. Keeps us off a new
+// dep just for one usage site; the only API surface we need is
+// `unbounded()`, `try_recv()`, and a `Send` sender.
+mod async_channel_shim {
+    use std::sync::mpsc;
+
+    pub struct Sender<T>(mpsc::Sender<T>);
+    pub struct Receiver<T>(mpsc::Receiver<T>);
+
+    impl<T> Sender<T> {
+        pub fn send(&self, v: T) -> Result<(), ()> {
+            self.0.send(v).map_err(|_| ())
+        }
+    }
+
+    impl<T> Receiver<T> {
+        pub fn try_recv(&self) -> Result<T, ()> {
+            self.0.try_recv().map_err(|_| ())
+        }
+    }
+
+    pub fn unbounded<T>() -> (Sender<T>, Receiver<T>) {
+        let (tx, rx) = mpsc::channel();
+        (Sender(tx), Receiver(rx))
+    }
+}
+
+use gtk::glib;
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -168,6 +311,8 @@ mod tests {
 
     #[test]
     fn unknown_theme_error_lists_options() {
+        // We can't construct a real ThemeManager without a Display, but we
+        // can exercise the same error-construction path by hand.
         let err = Error::Config(format!(
             "unknown theme {:?}; expected one of: {}",
             "solarized",
