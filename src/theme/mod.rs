@@ -281,6 +281,31 @@ mod tests {
     }
 
     #[test]
+    fn lookup_resolves_everforest_variants() {
+        for name in [
+            "everforest-dark",
+            "everforest-dark-soft",
+            "everforest-light",
+            "everforest-light-soft",
+        ] {
+            let resolved = builtin::lookup(name)
+                .unwrap_or_else(|| panic!("everforest variant {name} not registered"));
+            assert_eq!(resolved.canonical_name, name);
+        }
+        // Dark variants force dark, light variants force light.
+        assert!(matches!(
+            builtin::lookup("everforest-dark").unwrap().color_scheme,
+            adw::ColorScheme::ForceDark
+        ));
+        assert!(matches!(
+            builtin::lookup("everforest-light-soft")
+                .unwrap()
+                .color_scheme,
+            adw::ColorScheme::ForceLight
+        ));
+    }
+
+    #[test]
     fn known_names_includes_system_and_all_builtins() {
         let names = builtin::known_names();
         assert!(names.contains(&"system"));
