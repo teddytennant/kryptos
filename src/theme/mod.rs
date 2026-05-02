@@ -142,7 +142,7 @@ where
 
     let watch_dir = custom_css_path
         .parent()
-        .map(|p| p.to_path_buf())
+        .map(std::path::Path::to_path_buf)
         .unwrap_or_else(|| PathBuf::from("."));
     if !watch_dir.exists() {
         std::fs::create_dir_all(&watch_dir)?;
@@ -293,6 +293,15 @@ mod tests {
         }
     }
 
+    /// Every `kryptos_*` token referenced by widgets / modeline / chat
+    /// view. If a new palette is added missing one of these, themes will
+    /// silently render with GTK fallbacks — keep this list in lockstep
+    /// with what the CSS in `src/theme/css/_shared/` consumes.
+    const REQUIRED_TOKENS: &[&str] = &[
+        "bg", "mantle", "surface", "surface2", "overlay", "fg", "subtle", "accent", "blue",
+        "green", "yellow", "red", "lavender",
+    ];
+
     #[test]
     fn every_builtin_css_is_non_empty_and_defines_palette() {
         for b in builtin::ALL {
@@ -301,21 +310,36 @@ mod tests {
                 "{} css is empty",
                 b.canonical_name
             );
-            assert!(
-                b.css.contains("@define-color kryptos_bg"),
-                "{} missing @define-color kryptos_bg",
-                b.canonical_name
-            );
-            assert!(
-                b.css.contains("@define-color kryptos_fg"),
-                "{} missing @define-color kryptos_fg",
-                b.canonical_name
-            );
+            for token in REQUIRED_TOKENS {
+                let needle = format!("@define-color kryptos_{token}");
+                assert!(
+                    b.css.contains(&needle),
+                    "{} missing {needle}",
+                    b.canonical_name
+                );
+            }
             assert!(
                 b.css.contains(".modeline.normal"),
                 "{} missing .modeline.normal style",
                 b.canonical_name
             );
+        }
+    }
+
+    #[test]
+    fn every_palette_defines_all_required_tokens() {
+        // Strict version of the above: every palette must define every
+        // required token (no overlap with global @define-color from
+        // libadwaita).
+        for b in builtin::ALL {
+            for token in REQUIRED_TOKENS {
+                let needle = format!("@define-color kryptos_{token}");
+                assert!(
+                    b.css.contains(&needle),
+                    "palette {} is missing token kryptos_{token}",
+                    b.canonical_name
+                );
+            }
         }
     }
 
