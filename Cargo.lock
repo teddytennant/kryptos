@@ -1268,6 +1268,30 @@ dependencies = [
 ]
 
 [[package]]
+name = "kryptos"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "directories",
+ "futures-util",
+ "gtk4",
+ "libadwaita",
+ "notify",
+ "notify-rust",
+ "pretty_assertions",
+ "relm4",
+ "serde",
+ "sqlx",
+ "tempfile",
+ "thiserror 1.0.69",
+ "tokio",
+ "toml 0.8.23",
+ "tracing",
+ "tracing-subscriber",
+ "zbus",
+]
+
+[[package]]
 name = "lazy_static"
 version = "1.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2151,30 +2175,6 @@ checksum = "77549399552de45a898a580c1b41d445bf730df867cc44e6c0233bbc4b8329de"
 dependencies = [
  "digest",
  "rand_core",
-]
-
-[[package]]
-name = "sigvim"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "directories",
- "futures-util",
- "gtk4",
- "libadwaita",
- "notify",
- "notify-rust",
- "pretty_assertions",
- "relm4",
- "serde",
- "sqlx",
- "tempfile",
- "thiserror 1.0.69",
- "tokio",
- "toml 0.8.23",
- "tracing",
- "tracing-subscriber",
- "zbus",
 ]
 
 [[package]]

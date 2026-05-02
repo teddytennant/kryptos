@@ -1,7 +1,7 @@
 use std::process;
 
 fn main() {
-    sigvim::core::logging::init();
-    let exit = sigvim::ui::run();
+    kryptos::core::logging::init();
+    let exit = kryptos::ui::run();
     process::exit(exit.value());
 }

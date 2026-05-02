@@ -1,6 +1,6 @@
 use std::fmt;
 
-/// SigVim editor mode. Mirrors classic vim modes, adapted for a chat client.
+/// Kryptos editor mode. Mirrors classic vim modes, adapted for a chat client.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum Mode {
     /// Default. Navigation and leader-prefixed actions.

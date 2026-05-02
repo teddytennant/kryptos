@@ -16,7 +16,7 @@ result-*
 *.swo
 .DS_Store
 
-# SigVim runtime artifacts
+# Kryptos runtime artifacts
 *.db
 *.db-journal
 *.log

@@ -51,7 +51,7 @@ impl ConfigWatcher {
 
         let target = path;
         let thread = std::thread::Builder::new()
-            .name("sigvim-config-watcher".into())
+            .name("kryptos-config-watcher".into())
             .spawn(move || worker(raw_rx, target, tx))
             .map_err(|e| Error::Config(format!("spawn watcher thread: {e}")))?;
 

@@ -7,10 +7,10 @@ use tracing::{info, warn};
 use super::schema::Config;
 use crate::core::{Error, Result};
 
-/// XDG-resolved path: `$XDG_CONFIG_HOME/sigvim/config.toml`
-/// (typically `~/.config/sigvim/config.toml`).
+/// XDG-resolved path: `$XDG_CONFIG_HOME/kryptos/config.toml`
+/// (typically `~/.config/kryptos/config.toml`).
 pub fn default_path() -> Result<PathBuf> {
-    let dirs = ProjectDirs::from("dev", "sigvim", "sigvim")
+    let dirs = ProjectDirs::from("dev", "kryptos", "kryptos")
         .ok_or_else(|| Error::Config("could not resolve XDG config dir".into()))?;
     Ok(dirs.config_dir().join("config.toml"))
 }

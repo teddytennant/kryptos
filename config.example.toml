@@ -1,4 +1,4 @@
-# SigVim configuration — copy to ~/.config/sigvim/config.toml.
+# Kryptos configuration — copy to ~/.config/kryptos/config.toml.
 # Saving the file triggers a hot-reload; no restart required.
 
 [general]

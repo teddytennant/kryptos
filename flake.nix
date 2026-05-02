@@ -1,5 +1,5 @@
 {
-  description = "SigVim — A vim-first Signal desktop client for Linux";
+  description = "Kryptos — A vim-first Signal desktop client for Linux";
 
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
@@ -64,7 +64,7 @@
           shellHook = ''
             export XDG_DATA_DIRS="${pkgs.gtk4}/share/gsettings-schemas/${pkgs.gtk4.name}:${pkgs.libadwaita}/share/gsettings-schemas/${pkgs.libadwaita.name}:$XDG_DATA_DIRS"
             export GSETTINGS_SCHEMA_DIR="${pkgs.gtk4}/share/gsettings-schemas/${pkgs.gtk4.name}/glib-2.0/schemas"
-            echo "==> SigVim dev shell"
+            echo "==> Kryptos dev shell"
             echo "    cargo run        # build + launch"
             echo "    cargo nextest run # tests"
             echo "    cargo watch -x check"
@@ -73,16 +73,16 @@
 
         # `nix build` produces a release binary.
         packages.default = pkgs.rustPlatform.buildRustPackage {
-          pname = "sigvim";
+          pname = "kryptos";
           version = "0.1.0";
           src = ./.;
           cargoLock.lockFile = ./Cargo.lock;
           inherit nativeBuildInputs buildInputs;
           meta = with pkgs.lib; {
             description = "A vim-first Signal desktop client for Linux";
-            homepage = "https://github.com/teddytennant/sigvim";
+            homepage = "https://github.com/teddytennant/kryptos";
             license = with licenses; [ mit asl20 ];
-            mainProgram = "sigvim";
+            mainProgram = "kryptos";
             platforms = platforms.linux;
           };
         };

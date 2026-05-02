@@ -1,11 +1,11 @@
 [package]
-name = "sigvim"
+name = "kryptos"
 version = "0.1.0"
 edition = "2021"
 rust-version = "1.80"
 description = "A vim-first Signal desktop client for Linux"
 license = "MIT OR Apache-2.0"
-repository = "https://github.com/teddytennant/sigvim"
+repository = "https://github.com/teddytennant/kryptos"
 keywords = ["signal", "messenger", "vim", "gtk4", "libadwaita"]
 categories = ["gui"]
 

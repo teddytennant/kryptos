@@ -1,6 +1,6 @@
 //! Type-safe zbus proxies for the signal-cli D-Bus API.
 //!
-//! Mirrors the surface SigVim consumes. Interface specs:
+//! Mirrors the surface Kryptos consumes. Interface specs:
 //! <https://github.com/AsamK/signal-cli/blob/master/man/signal-cli-dbus.5.adoc>.
 
 use zbus::proxy;

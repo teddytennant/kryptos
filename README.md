@@ -1,4 +1,4 @@
-# SigVim
+# Kryptos
 
 A vim-first Signal desktop client for Linux. Native GTK4 + libadwaita.
 No Electron, no webview. Built for NixOS + Hyprland; works anywhere
@@ -34,7 +34,7 @@ cargo nextest run    # tests
 A release binary:
 
 ```sh
-nix build .#         # → ./result/bin/sigvim
+nix build .#         # → ./result/bin/kryptos
 ```
 
 ### Without Nix
@@ -48,13 +48,13 @@ cargo run
 
 ## Configuration
 
-SigVim reads `~/.config/sigvim/config.toml`. A complete, commented
+Kryptos reads `~/.config/kryptos/config.toml`. A complete, commented
 example lives at [`config.example.toml`](./config.example.toml). Copy
 it and edit. Changes are picked up live — no restart.
 
 ```sh
-mkdir -p ~/.config/sigvim
-cp config.example.toml ~/.config/sigvim/config.toml
+mkdir -p ~/.config/kryptos
+cp config.example.toml ~/.config/kryptos/config.toml
 ```
 
 ## Repo layout

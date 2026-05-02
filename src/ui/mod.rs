@@ -2,7 +2,7 @@ use adw::prelude::*;
 use gtk::glib;
 use tracing::info;
 
-const APP_ID: &str = "dev.sigvim.SigVim";
+const APP_ID: &str = "dev.kryptos.Kryptos";
 
 /// Run the libadwaita application loop. Returns the glib exit code.
 pub fn run() -> glib::ExitCode {
@@ -18,7 +18,7 @@ fn build_window(app: &adw::Application) {
     info!("activating main window");
 
     let label = gtk::Label::builder()
-        .label("SigVim\n\nphase 0 — foundation\n\n(GTK4 + libadwaita pipe verified)")
+        .label("Kryptos\n\nphase 0 — foundation\n\n(GTK4 + libadwaita pipe verified)")
         .halign(gtk::Align::Center)
         .valign(gtk::Align::Center)
         .justify(gtk::Justification::Center)
@@ -32,7 +32,7 @@ fn build_window(app: &adw::Application) {
 
     let window = adw::ApplicationWindow::builder()
         .application(app)
-        .title("SigVim")
+        .title("Kryptos")
         .default_width(1100)
         .default_height(720)
         .content(&toolbar)
