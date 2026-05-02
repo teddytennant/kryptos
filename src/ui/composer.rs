@@ -76,6 +76,9 @@ pub struct Composer {
     /// Label inside the mode-badge pill; separated from the badge box so
     /// the leading dot indicator can be styled independently.
     mode_badge_text: gtk::Label,
+    /// Placeholder label overlaid on the empty TextView. Hidden as soon
+    /// as the buffer has content; revealed again when it empties out.
+    placeholder: gtk::Label,
     mode: Rc<RefCell<ComposerMode>>,
     on_send: Rc<RefCell<Option<SendCallback>>>,
     yank: Rc<RefCell<String>>,
@@ -100,18 +103,36 @@ impl Composer {
         let mode_text = gtk::Label::new(Some(ComposerMode::Normal.label()));
         mode_text.set_visible(false);
 
+        // Placeholder overlaid on the TextView. GtkTextView has no
+        // native placeholder support; we layer a label inside an Overlay
+        // and toggle its visibility on buffer-change.
+        let placeholder = gtk::Label::builder()
+            .label("Type a message")
+            .halign(gtk::Align::Start)
+            .valign(gtk::Align::Start)
+            .can_target(false)
+            .build();
+        placeholder.add_css_class("kryptos-composer-placeholder");
+        placeholder.set_margin_start(14);
+        placeholder.set_margin_top(10);
+
+        let overlay = gtk::Overlay::new();
+        overlay.set_child(Some(&text_view));
+        overlay.add_overlay(&placeholder);
+
         let wrapper = gtk::Box::builder()
             .orientation(gtk::Orientation::Vertical)
             .spacing(0)
             .build();
         wrapper.add_css_class("kryptos-composer-wrapper");
         wrapper.add_css_class(ComposerMode::Normal.css_class());
-        wrapper.append(&text_view);
+        wrapper.append(&overlay);
 
         let composer = Self {
             text_view,
             wrapper,
             mode_badge_text: mode_text,
+            placeholder,
             mode: Rc::new(RefCell::new(ComposerMode::Normal)),
             on_send: Rc::new(RefCell::new(None)),
             yank: Rc::new(RefCell::new(String::new())),
@@ -119,6 +140,7 @@ impl Composer {
         };
 
         composer.install_key_controller();
+        composer.install_placeholder_tracker();
         composer
     }
 
@@ -202,6 +224,25 @@ impl Composer {
         self.text_view.add_controller(controller);
     }
 
+    /// Hook the buffer's `changed` signal so the placeholder hides on
+    /// the first keystroke and reappears when the buffer empties.
+    fn install_placeholder_tracker(&self) {
+        let placeholder = self.placeholder.clone();
+        let buf = self.text_view.buffer();
+        // Initial state: shown for empty buffers.
+        placeholder.set_visible(buf.char_count() == 0);
+        buf.connect_changed(move |buffer| {
+            placeholder.set_visible(buffer.char_count() == 0);
+        });
+    }
+
+    /// Wipe the composer's text and return to Normal mode. Bound to
+    /// `Ctrl-K` (vim-ish) and exposed for the dispatcher / commands.
+    pub fn clear(&self) {
+        self.text_view.buffer().set_text("");
+        self.set_mode(ComposerMode::Normal);
+    }
+
     fn on_key(&self, keyval: gdk::Key, state: gdk::ModifierType) -> glib::Propagation {
         let shift = state.contains(gdk::ModifierType::SHIFT_MASK);
         let ctrl = state.contains(gdk::ModifierType::CONTROL_MASK);
@@ -226,6 +267,14 @@ impl Composer {
         // Esc always returns to Normal.
         if keyval == gdk::Key::Escape {
             self.set_mode(ComposerMode::Normal);
+            return glib::Propagation::Stop;
+        }
+
+        // Ctrl-K: clear composer (vim-ish — closer to `<C-u>` semantically
+        // but `<C-u>` is half-page-up in Normal). Fires regardless of
+        // mode so it works as the universal "wipe and try again".
+        if ctrl && matches!(keyval, gdk::Key::k | gdk::Key::K) {
+            self.clear();
             return glib::Propagation::Stop;
         }
 
