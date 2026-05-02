@@ -17,7 +17,7 @@
 //! into the config so the welcome window is one-shot.
 
 use std::cell::Cell;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::rc::Rc;
 
 use adw::prelude::*;
@@ -381,7 +381,7 @@ fn page_done(
     win: &adw::Window,
     finished: &Rc<Cell<bool>>,
     on_finish: Rc<dyn Fn()>,
-    config_path: &PathBuf,
+    config_path: &Path,
 ) -> gtk::Widget {
     let column = gtk::Box::builder()
         .orientation(gtk::Orientation::Vertical)
@@ -413,7 +413,7 @@ fn page_done(
 
     {
         let win = win.clone();
-        let path = config_path.clone();
+        let path = config_path.to_path_buf();
         let finished = finished.clone();
         let on_finish = on_finish.clone();
         cta.connect_clicked(move |_| {
