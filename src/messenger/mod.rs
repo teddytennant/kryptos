@@ -13,6 +13,8 @@
 //! All chat IDs travel as [`ChatId`] (`backend + native id`) so the UI can
 //! mix backends without losing track of where a conversation came from.
 
+pub mod signal;
+
 use std::fmt;
 use std::path::PathBuf;
 
