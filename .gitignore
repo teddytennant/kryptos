@@ -20,3 +20,4 @@ result-*
 *.db
 *.db-journal
 *.log
+.claude/
