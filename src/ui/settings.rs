@@ -24,7 +24,8 @@ use crate::config::loader;
 use crate::config::Config;
 use crate::core::{Error, Result};
 use crate::dbus::SignalClient;
-use crate::theme::builtin;
+use crate::theme::builtin::PaletteSwatch;
+use crate::theme::swatch;
 use crate::vim::Key;
 
 const DEBOUNCE: Duration = Duration::from_millis(250);
@@ -81,28 +82,7 @@ fn appearance_page(cfg: &Config, writer: Rc<DebouncedWriter>) -> adw::Preference
         .title("Theme")
         .description("Built-in palettes hot-reload as you select them.")
         .build();
-
-    let names = builtin::known_names();
-    let model = gtk::StringList::new(&names);
-    let combo = adw::ComboRow::builder()
-        .title("Theme")
-        .subtitle("Built-in palette or follow desktop")
-        .model(&model)
-        .build();
-    if let Some(idx) = names.iter().position(|n| *n == cfg.general.theme.as_str()) {
-        combo.set_selected(idx as u32);
-    }
-    let writer_combo = writer.clone();
-    let names_owned: Vec<String> = names.iter().map(std::string::ToString::to_string).collect();
-    combo.connect_selected_notify(move |row| {
-        let idx = row.selected() as usize;
-        if let Some(name) = names_owned.get(idx).cloned() {
-            writer_combo.queue(move |cfg| {
-                cfg.general.theme = name;
-            });
-        }
-    });
-    group.add(&combo);
+    group.add(&theme_picker(cfg, writer.clone()));
     page.add(&group);
 
     let typo = adw::PreferencesGroup::builder().title("Typography").build();
@@ -132,6 +112,193 @@ fn appearance_page(cfg: &Config, writer: Rc<DebouncedWriter>) -> adw::Preference
 
     page.add(&typo);
     page
+}
+
+// ---------------------------------------------------------------------------
+// Theme picker — flow-grid of preview cards
+// ---------------------------------------------------------------------------
+
+const CARD_W: i32 = 96;
+const CARD_H: i32 = 60;
+
+/// Build a `FlowBox` of theme preview cards plus a "system" card. Selecting
+/// a card writes `general.theme` through the debounced writer.
+fn theme_picker(cfg: &Config, writer: Rc<DebouncedWriter>) -> gtk::FlowBox {
+    let flow = gtk::FlowBox::builder()
+        .selection_mode(gtk::SelectionMode::None)
+        .homogeneous(true)
+        .row_spacing(12)
+        .column_spacing(12)
+        .min_children_per_line(3)
+        .max_children_per_line(6)
+        .margin_top(8)
+        .margin_bottom(8)
+        .margin_start(8)
+        .margin_end(8)
+        .build();
+
+    let cards: Rc<RefCell<Vec<(String, gtk::Box)>>> = Rc::new(RefCell::new(Vec::new()));
+    let current = cfg.general.theme.clone();
+
+    // The "system" card shows two halves — light/dark — to read as
+    // "follow the desktop" without needing a palette table entry.
+    add_card(&flow, &cards, &writer, &current, "system", None);
+
+    for sw in swatch::ALL {
+        add_card(&flow, &cards, &writer, &current, sw.name, Some(sw));
+    }
+
+    flow
+}
+
+fn add_card(
+    flow: &gtk::FlowBox,
+    cards: &Rc<RefCell<Vec<(String, gtk::Box)>>>,
+    writer: &Rc<DebouncedWriter>,
+    current: &str,
+    name: &str,
+    swatch: Option<&'static PaletteSwatch>,
+) {
+    let outer = gtk::Box::builder()
+        .orientation(gtk::Orientation::Vertical)
+        .spacing(6)
+        .css_classes(["kryptos-theme-card"])
+        .build();
+    if name == current {
+        outer.add_css_class("selected");
+    }
+
+    let area = gtk::DrawingArea::builder()
+        .content_width(CARD_W)
+        .content_height(CARD_H)
+        .build();
+    let owned_swatch = swatch.copied();
+    area.set_draw_func(move |_, cr, w, h| {
+        match owned_swatch {
+            Some(s) => draw_swatch(cr, w as f64, h as f64, &s),
+            None => draw_system(cr, w as f64, h as f64),
+        }
+    });
+
+    let label = gtk::Label::builder()
+        .label(name)
+        .css_classes(["kryptos-theme-card-label"])
+        .build();
+
+    outer.append(&area);
+    outer.append(&label);
+
+    let child = gtk::FlowBoxChild::builder()
+        .child(&outer)
+        .focusable(true)
+        .build();
+
+    let click = gtk::GestureClick::new();
+    let writer_click = writer.clone();
+    let cards_click = cards.clone();
+    let name_owned = name.to_string();
+    click.connect_pressed(move |_, _, _, _| {
+        let target = name_owned.clone();
+        for (n, b) in cards_click.borrow().iter() {
+            if n == &target {
+                b.add_css_class("selected");
+            } else {
+                b.remove_css_class("selected");
+            }
+        }
+        let to_write = target.clone();
+        writer_click.queue(move |cfg| cfg.general.theme = to_write);
+    });
+    child.add_controller(click);
+
+    flow.append(&child);
+    cards.borrow_mut().push((name.to_string(), outer));
+}
+
+/// Tiny mock chat: split sidebar + content, one accent bubble, one neutral.
+fn draw_swatch(cr: &gtk::cairo::Context, w: f64, h: f64, s: &PaletteSwatch) {
+    set_rgb(cr, s.bg);
+    let _ = cr.rectangle(0.0, 0.0, w, h);
+    let _ = cr.fill();
+
+    let sidebar_w = (w * 0.28).round();
+    set_rgb(cr, s.mantle);
+    let _ = cr.rectangle(0.0, 0.0, sidebar_w, h);
+    let _ = cr.fill();
+
+    // Three sidebar rows.
+    set_rgb(cr, s.subtle);
+    cr.set_line_width(1.0);
+    for i in 0..3 {
+        let y = 10.0 + (i as f64) * 12.0;
+        let _ = cr.rectangle(6.0, y, sidebar_w - 12.0, 2.0);
+        let _ = cr.fill();
+    }
+
+    // Bubble theirs (left, neutral surface).
+    set_rgb(cr, s.surface);
+    rounded_rect(cr, sidebar_w + 6.0, 10.0, 36.0, 10.0, 4.0);
+    let _ = cr.fill();
+
+    // Bubble mine (right, accent).
+    set_rgb(cr, s.accent);
+    rounded_rect(cr, w - 44.0, 26.0, 38.0, 10.0, 4.0);
+    let _ = cr.fill();
+
+    // Foreground hairline (mock composer).
+    set_rgb(cr, s.fg);
+    let _ = cr.rectangle(sidebar_w + 6.0, h - 10.0, w - sidebar_w - 12.0, 2.0);
+    let _ = cr.fill();
+}
+
+/// "System" card: split light/dark halves with a diagonal seam.
+fn draw_system(cr: &gtk::cairo::Context, w: f64, h: f64) {
+    set_rgb(cr, [0xf2, 0xf2, 0xf2]);
+    let _ = cr.rectangle(0.0, 0.0, w, h);
+    let _ = cr.fill();
+
+    set_rgb(cr, [0x1d, 0x1d, 0x1d]);
+    let _ = cr.move_to(w, 0.0);
+    let _ = cr.line_to(0.0, h);
+    let _ = cr.line_to(w, h);
+    let _ = cr.close_path();
+    let _ = cr.fill();
+}
+
+fn set_rgb(cr: &gtk::cairo::Context, rgb: [u8; 3]) {
+    cr.set_source_rgb(
+        f64::from(rgb[0]) / 255.0,
+        f64::from(rgb[1]) / 255.0,
+        f64::from(rgb[2]) / 255.0,
+    );
+}
+
+fn rounded_rect(cr: &gtk::cairo::Context, x: f64, y: f64, w: f64, h: f64, r: f64) {
+    let r = r.min(w / 2.0).min(h / 2.0);
+    let _ = cr.new_sub_path();
+    let _ = cr.arc(
+        x + w - r,
+        y + r,
+        r,
+        -std::f64::consts::FRAC_PI_2,
+        0.0,
+    );
+    let _ = cr.arc(x + w - r, y + h - r, r, 0.0, std::f64::consts::FRAC_PI_2);
+    let _ = cr.arc(
+        x + r,
+        y + h - r,
+        r,
+        std::f64::consts::FRAC_PI_2,
+        std::f64::consts::PI,
+    );
+    let _ = cr.arc(
+        x + r,
+        y + r,
+        r,
+        std::f64::consts::PI,
+        3.0 * std::f64::consts::FRAC_PI_2,
+    );
+    let _ = cr.close_path();
 }
 
 fn behavior_page(cfg: &Config, writer: Rc<DebouncedWriter>) -> adw::PreferencesPage {

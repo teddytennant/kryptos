@@ -3,6 +3,8 @@
 
 use adw::ColorScheme;
 
+pub use super::swatch::{palette_for, PaletteSwatch};
+
 pub const CATPPUCCIN_MOCHA: &str = include_str!("css/catppuccin-mocha.css");
 pub const CATPPUCCIN_LATTE: &str = include_str!("css/catppuccin-latte.css");
 pub const CATPPUCCIN_FRAPPE: &str = include_str!("css/catppuccin-frappe.css");

@@ -412,3 +412,28 @@ button.suggested-action.kryptos-linker-generate:hover {
 .kryptos-linker-copy:hover {
   color: @kryptos_fg;
 }
+
+/* ─── Theme picker card (Settings → Appearance) ──────────────────── */
+.kryptos-theme-card {
+  padding: 6px;
+  border-radius: 6px;
+  border: 2px solid transparent;
+  background-color: alpha(@kryptos_fg, 0.03);
+  transition: border-color 120ms ease-out, background-color 120ms ease-out;
+}
+.kryptos-theme-card:hover {
+  background-color: alpha(@kryptos_fg, 0.06);
+}
+.kryptos-theme-card.selected {
+  border-color: @kryptos_accent;
+  background-color: alpha(@kryptos_accent, 0.08);
+}
+.kryptos-theme-card-label {
+  font-family: "JetBrains Mono", monospace;
+  font-size: 12px;
+  color: @kryptos_subtle;
+  letter-spacing: 0.02em;
+}
+.kryptos-theme-card.selected .kryptos-theme-card-label {
+  color: @kryptos_fg;
+}
