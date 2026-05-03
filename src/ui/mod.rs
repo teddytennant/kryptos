@@ -386,6 +386,7 @@ fn spawn_event_subscription(
     });
 
     let messages_box = parts.messages_box.clone();
+    let messages_scroller = parts.messages_scroller.clone();
     let sidebar_index = parts.sidebar_index.clone();
     let sidebar_list = parts.sidebar_list.clone();
     let sidebar_scroller = parts.sidebar_scroller.clone();
@@ -417,7 +418,12 @@ fn spawn_event_subscription(
                             .borrow()
                             .get(&msg.id.backend)
                             .cloned();
-                        append_message_widget(&messages_box, &msg, own_id.as_deref());
+                        append_message_widget(
+                            &messages_box,
+                            &messages_scroller,
+                            &msg,
+                            own_id.as_deref(),
+                        );
                     }
                     let _ = &content_title;
                 }
@@ -486,6 +492,7 @@ fn wire_sidebar_selection(
 ) {
     let sidebar_index = parts.sidebar_index.clone();
     let messages_box = parts.messages_box.clone();
+    let messages_scroller = parts.messages_scroller.clone();
     let content_title = parts.content_title.clone();
 
     parts.sidebar_list.connect_row_selected(move |_, row| {
@@ -515,7 +522,7 @@ fn wire_sidebar_selection(
         // Sort oldest-first; cache returns DESC.
         let mut sorted = cache_msgs.clone();
         sorted.sort_by_key(|m| m.ts);
-        rebuild_messages_box(&messages_box, &sorted, &id, own_id.as_deref());
+        rebuild_messages_box(&messages_box, &messages_scroller, &sorted, &id, own_id.as_deref());
 
         // Async refresh from hub.
         let id_clone = id.clone();
@@ -557,6 +564,7 @@ fn wire_sidebar_selection(
         });
 
         let messages_box_ui = messages_box.clone();
+        let messages_scroller_ui = messages_scroller.clone();
         let id_for_ui = id.clone();
         let own_id_for_ui = own_id.clone();
         glib::source::timeout_add_local(Duration::from_millis(120), move || match rx.try_recv() {
@@ -565,6 +573,7 @@ fn wire_sidebar_selection(
                     msgs.sort_by_key(|m| m.ts_ms);
                     rebuild_messages_box_normalized(
                         &messages_box_ui,
+                        &messages_scroller_ui,
                         &msgs,
                         &id_for_ui,
                         own_id_for_ui.as_deref(),
@@ -590,6 +599,7 @@ fn wire_composer_send(
 ) {
     let mode_line = parts.mode_line.clone();
     let messages_box = parts.messages_box.clone();
+    let messages_scroller = parts.messages_scroller.clone();
     let toast_overlay = parts.toast_overlay.clone();
 
     parts.composer.set_on_send(move |text| {
@@ -637,7 +647,7 @@ fn wire_composer_send(
                 },
             },
         };
-        append_message_widget(&messages_box, &optimistic, own_id.as_deref());
+        append_message_widget(&messages_box, &messages_scroller, &optimistic, own_id.as_deref());
 
         if let Some(ctx) = ctx.clone() {
             let id_clone = id.clone();
@@ -752,7 +762,13 @@ impl WindowPartsLite {
     }
 }
 
-fn rebuild_messages_box(b: &gtk::Box, msgs: &[Message], id: &ChatId, own_id: Option<&str>) {
+fn rebuild_messages_box(
+    b: &gtk::Box,
+    scroller: &gtk::ScrolledWindow,
+    msgs: &[Message],
+    id: &ChatId,
+    own_id: Option<&str>,
+) {
     while let Some(child) = b.first_child() {
         b.remove(&child);
     }
@@ -776,10 +792,13 @@ fn rebuild_messages_box(b: &gtk::Box, msgs: &[Message], id: &ChatId, own_id: Opt
         })
         .collect();
     window::populate_messages(b, &rows, now);
+    // Fresh chat open / cache load: pin to the latest message.
+    window::scroll_to_bottom_idle(scroller);
 }
 
 fn rebuild_messages_box_normalized(
     b: &gtk::Box,
+    scroller: &gtk::ScrolledWindow,
     msgs: &[NormalizedMessage],
     id: &ChatId,
     own_id: Option<&str>,
@@ -807,9 +826,24 @@ fn rebuild_messages_box_normalized(
         })
         .collect();
     window::populate_messages(b, &rows, now);
+    // Hub refresh after a chat switch is still a "first render" of fresh
+    // history — pin to the latest message so the user lands at the foot.
+    window::scroll_to_bottom_idle(scroller);
 }
 
-fn append_message_widget(messages_box: &gtk::Box, msg: &NormalizedMessage, own_id: Option<&str>) {
+/// Append a single new message to the visible chat. If the user was
+/// already at (or within `NEAR_BOTTOM_PX` of) the foot of the scroller
+/// when the message arrived, snap to the new bottom on the next idle
+/// tick. If they had scrolled up to read history, leave the viewport
+/// alone — yanking them back is the textbook "chat app loses my place"
+/// regression and we explicitly don't want it.
+fn append_message_widget(
+    messages_box: &gtk::Box,
+    scroller: &gtk::ScrolledWindow,
+    msg: &NormalizedMessage,
+    own_id: Option<&str>,
+) {
+    let was_near_bottom = window::is_near_bottom(scroller);
     if let Some(first) = messages_box.first_child() {
         if first.has_css_class("kryptos-empty-state") {
             messages_box.remove(&first);
@@ -819,6 +853,9 @@ fn append_message_widget(messages_box: &gtk::Box, msg: &NormalizedMessage, own_i
     let label = window::format_clock_label(msg.ts_ms);
     let body = msg.body.clone().unwrap_or_default();
     messages_box.append(&window::message_row(mine, &body, &label, true, true));
+    if was_near_bottom {
+        window::scroll_to_bottom_idle(scroller);
+    }
 }
 
 fn conv_row_to_summary(c: &Conversation) -> ConversationSummary {
