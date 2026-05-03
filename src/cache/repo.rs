@@ -5,7 +5,7 @@
 
 use sqlx::Row;
 
-use super::models::{Attachment, Contact, Conversation, Message, Reaction};
+use super::models::{Attachment, Contact, Conversation, Message, MessengerContact, Reaction};
 use super::Cache;
 use crate::core::Result;
 
@@ -211,6 +211,88 @@ impl Cache {
         })
     }
 
+    /// Upsert a per-backend contact / peer's display name. Updates
+    /// `updated_at` to the current wall-clock unix millis so a future
+    /// "stale-after-N-days" refresh check can do its job.
+    pub async fn upsert_messenger_contact(
+        &self,
+        backend: &str,
+        native_id: &str,
+        display_name: &str,
+    ) -> Result<()> {
+        let now = current_unix_ms();
+        sqlx::query(
+            r#"
+            INSERT INTO messenger_contacts (backend, native_id, display_name, updated_at)
+            VALUES (?, ?, ?, ?)
+            ON CONFLICT(backend, native_id) DO UPDATE SET
+                display_name = excluded.display_name,
+                updated_at   = excluded.updated_at
+            "#,
+        )
+        .bind(backend)
+        .bind(native_id)
+        .bind(display_name)
+        .bind(now)
+        .execute(self.pool())
+        .await?;
+        Ok(())
+    }
+
+    /// Fetch a single contact's display name. `None` if the
+    /// `(backend, native_id)` pair has never been recorded — callers
+    /// fall back to the raw native id in that case.
+    pub async fn get_messenger_contact_name(
+        &self,
+        backend: &str,
+        native_id: &str,
+    ) -> Result<Option<String>> {
+        let row = sqlx::query(
+            r#"
+            SELECT display_name
+            FROM messenger_contacts
+            WHERE backend = ? AND native_id = ?
+            "#,
+        )
+        .bind(backend)
+        .bind(native_id)
+        .fetch_optional(self.pool())
+        .await?;
+        Ok(match row {
+            Some(row) => Some(row.try_get("display_name")?),
+            None => None,
+        })
+    }
+
+    /// Fetch the full contact row. Useful for tests that want to
+    /// assert on `updated_at` and for diagnostics.
+    pub async fn get_messenger_contact(
+        &self,
+        backend: &str,
+        native_id: &str,
+    ) -> Result<Option<MessengerContact>> {
+        let row = sqlx::query(
+            r#"
+            SELECT backend, native_id, display_name, updated_at
+            FROM messenger_contacts
+            WHERE backend = ? AND native_id = ?
+            "#,
+        )
+        .bind(backend)
+        .bind(native_id)
+        .fetch_optional(self.pool())
+        .await?;
+        Ok(match row {
+            Some(row) => Some(MessengerContact {
+                backend: row.try_get("backend")?,
+                native_id: row.try_get("native_id")?,
+                display_name: row.try_get("display_name")?,
+                updated_at: row.try_get("updated_at")?,
+            }),
+            None => None,
+        })
+    }
+
     pub async fn add_attachment(&self, a: &Attachment) -> Result<i64> {
         let row = sqlx::query(
             r#"
@@ -289,4 +371,14 @@ impl Cache {
         .await?;
         Ok(())
     }
+}
+
+/// Current wall-clock time in unix milliseconds. Pulled into a
+/// freestanding helper so the contact upsert doesn't have to drag
+/// `chrono` in.
+fn current_unix_ms() -> i64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_millis() as i64)
+        .unwrap_or(0)
 }

@@ -1,4 +1,4 @@
-use super::models::{Attachment, Contact, Conversation, Message, Reaction};
+use super::models::{Attachment, Contact, Conversation, Message, MessengerContact, Reaction};
 use super::Cache;
 
 fn convo(id: &str, last_ts: Option<i64>) -> Conversation {
@@ -334,4 +334,113 @@ async fn list_conversations_ties_keep_every_row() {
     for want in ["alpha", "bravo", "charlie", "delta"] {
         assert!(ids.iter().any(|i| i == want), "missing {want}");
     }
+}
+
+/// `messenger_contacts` upsert + lookup round-trip. Confirms the
+/// (backend, native_id) composite key, the `display_name` payload,
+/// and that updates overwrite the previous name without spawning a
+/// duplicate row.
+#[tokio::test(flavor = "multi_thread")]
+async fn messenger_contact_roundtrip() {
+    let cache = Cache::open_in_memory().await.unwrap();
+
+    cache
+        .upsert_messenger_contact("signal", "+14155552671", "Alice")
+        .await
+        .unwrap();
+    cache
+        .upsert_messenger_contact("telegram", "12345", "Bob B")
+        .await
+        .unwrap();
+
+    assert_eq!(
+        cache
+            .get_messenger_contact_name("signal", "+14155552671")
+            .await
+            .unwrap(),
+        Some("Alice".into())
+    );
+    assert_eq!(
+        cache
+            .get_messenger_contact_name("telegram", "12345")
+            .await
+            .unwrap(),
+        Some("Bob B".into())
+    );
+
+    // Upsert overwrites the display name in place rather than
+    // inserting a second row.
+    cache
+        .upsert_messenger_contact("signal", "+14155552671", "Alice Smith")
+        .await
+        .unwrap();
+    assert_eq!(
+        cache
+            .get_messenger_contact_name("signal", "+14155552671")
+            .await
+            .unwrap(),
+        Some("Alice Smith".into())
+    );
+
+    // (backend, native_id) is composite — same native id under a
+    // different backend is its own row.
+    cache
+        .upsert_messenger_contact("telegram", "+14155552671", "different person")
+        .await
+        .unwrap();
+    assert_eq!(
+        cache
+            .get_messenger_contact_name("signal", "+14155552671")
+            .await
+            .unwrap(),
+        Some("Alice Smith".into()),
+        "telegram upsert must not stomp signal's row"
+    );
+
+    // Unknown peer returns None — caller falls back to native id.
+    assert_eq!(
+        cache
+            .get_messenger_contact_name("signal", "+19999999999")
+            .await
+            .unwrap(),
+        None
+    );
+}
+
+/// `get_messenger_contact` (full row) returns a recent `updated_at`
+/// (within a few seconds of "now"). We accept a wide window to dodge
+/// CI clock skew, just enough to prove the upsert wrote a real
+/// timestamp instead of leaving zero.
+#[tokio::test(flavor = "multi_thread")]
+async fn messenger_contact_records_updated_at() {
+    let cache = Cache::open_in_memory().await.unwrap();
+    let before = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_millis() as i64;
+    cache
+        .upsert_messenger_contact("signal", "+14155552671", "Alice")
+        .await
+        .unwrap();
+    let row: MessengerContact = cache
+        .get_messenger_contact("signal", "+14155552671")
+        .await
+        .unwrap()
+        .expect("row must exist");
+    assert_eq!(row.backend, "signal");
+    assert_eq!(row.native_id, "+14155552671");
+    assert_eq!(row.display_name, "Alice");
+    // Allow a 60 second slack each side; we just want to lock down
+    // that updated_at is "recent" (and definitely not zero).
+    let after = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_millis() as i64;
+    assert!(
+        row.updated_at >= before - 60_000 && row.updated_at <= after + 60_000,
+        "updated_at out of window: {} not in [{}, {}]",
+        row.updated_at,
+        before - 60_000,
+        after + 60_000
+    );
 }

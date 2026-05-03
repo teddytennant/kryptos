@@ -29,7 +29,7 @@ use std::sync::{Arc, OnceLock};
 use async_trait::async_trait;
 use grammers_client::session::{PackedChat, Session};
 use grammers_client::{
-    types::{InputMessage, LoginToken, Update},
+    types::{Chat, InputMessage, LoginToken, Update},
     Client, Config as GClientConfig, InitParams, InvocationError, SignInError,
 };
 use grammers_tl_types as tl;
@@ -37,6 +37,7 @@ use tokio::sync::{broadcast, mpsc, Mutex};
 use tokio::time::{sleep, Duration};
 use tracing::{debug, warn};
 
+use crate::cache::Cache;
 use crate::core::{Error, Result};
 use crate::messenger::{
     Backend, BackendExtras, ChatId, ConversationSummary, Event, MessengerBackend,
@@ -88,6 +89,10 @@ pub struct TelegramBackend {
     /// authorisation check. `OnceLock` so `self_account()` stays a
     /// non-async `&str`-returning method on the trait.
     self_id: OnceLock<String>,
+    /// Optional shared cache used to persist resolved chat / sender
+    /// display names so a cold start can render real labels before
+    /// the first network refresh completes.
+    cache: Option<Arc<Cache>>,
 }
 
 impl TelegramBackend {
@@ -117,7 +122,16 @@ impl TelegramBackend {
             forwarder_started: Mutex::new(false),
             login: Arc::new(Mutex::new(LoginState::default())),
             self_id: OnceLock::new(),
+            cache: None,
         })
+    }
+
+    /// Builder-style: attach a shared [`Cache`] so chat / contact
+    /// names resolved during `list_conversations` and incoming
+    /// updates write through to `messenger_contacts`.
+    pub fn with_cache(mut self, cache: Arc<Cache>) -> Self {
+        self.cache = Some(cache);
+        self
     }
 
     /// `true` if the persisted session is already signed in. Hits the
@@ -247,9 +261,28 @@ impl MessengerBackend for TelegramBackend {
                 tl::enums::Dialog::Dialog(d) => d.unread_count.max(0) as u32,
                 tl::enums::Dialog::Folder(_) => 0,
             };
+            let native = conv::packed_to_native(chat.pack());
+            let title = chat.name().to_string();
+            // For users we prefer the explicit "first [last]" form
+            // because grammers' `Chat::name()` collapses to first
+            // name only for users with a last name configured. For
+            // groups/channels grammers' `name()` already returns the
+            // title, so reuse it.
+            let display_name = chat_display_name(chat);
+            // Persist the resolved name so the lazy event-side
+            // enrichment finds it without another iter_dialogs pass.
+            if let (Some(cache), Some(name)) = (self.cache.as_ref(), display_name.as_ref()) {
+                if let Err(e) = cache
+                    .upsert_messenger_contact(Backend::Telegram.as_tag(), &native, name)
+                    .await
+                {
+                    debug!(error = %e, "messenger_contacts upsert failed (telegram)");
+                }
+            }
             out.push(ConversationSummary {
-                id: ChatId::new(Backend::Telegram, conv::packed_to_native(chat.pack())),
-                title: chat.name().to_string(),
+                id: ChatId::new(Backend::Telegram, native),
+                title,
+                display_name,
                 last_message_ts,
                 unread,
             });
@@ -443,17 +476,55 @@ impl TelegramBackend {
     }
 }
 
+/// Friendly display name for a Telegram chat. For users we prefer
+/// `first_name [last_name]` because grammers' [`Chat::name`] strips
+/// last names; for groups / channels we let `Chat::name` handle it
+/// (it returns the title verbatim). Returns `None` when no name is
+/// available so the caller falls back to the raw native id.
+fn chat_display_name(chat: &Chat) -> Option<String> {
+    match chat {
+        Chat::User(user) => {
+            let first = user.first_name();
+            let last = user.last_name().unwrap_or("");
+            let combined = match (first.is_empty(), last.is_empty()) {
+                (false, false) => format!("{first} {last}"),
+                (false, true) => first.to_string(),
+                (true, false) => last.to_string(),
+                (true, true) => return None,
+            };
+            Some(combined)
+        }
+        // Groups / channels: grammers' `name()` already returns the
+        // title. Empty strings collapse to None so the UI knows to
+        // fall back.
+        other => {
+            let n = other.name();
+            if n.is_empty() {
+                None
+            } else {
+                Some(n.to_string())
+            }
+        }
+    }
+}
+
 /// Convert a grammers [`Message`](grammers_client::types::Message)
 /// into the protocol-neutral [`NormalizedMessage`]. The `id` is the
 /// `ChatId` of the conversation we fetched from; we copy it instead
 /// of recomputing the chat hex per message because `iter_messages`
 /// already addresses one chat at a time.
 fn message_to_normalized(msg: &grammers_client::types::Message, id: &ChatId) -> NormalizedMessage {
-    let sender = msg
-        .sender()
-        .map(|c| c.name().to_string())
-        .filter(|s| !s.is_empty())
-        .unwrap_or_default();
+    // Telegram exposes the friendly "first [last]" via the same
+    // helper we use for the chat list, so the per-message author
+    // label stays consistent with the sidebar.
+    let (sender, sender_display) = match msg.sender() {
+        Some(ref c) => {
+            let raw = c.name().to_string();
+            let pretty = chat_display_name(c).filter(|s| s != &raw);
+            (raw, pretty)
+        }
+        None => (String::new(), None),
+    };
 
     let reply_to_msg_id = match msg.reply_header() {
         Some(tl::enums::MessageReplyHeader::Header(h)) => h.reply_to_msg_id.map(i64::from),
@@ -464,6 +535,7 @@ fn message_to_normalized(msg: &grammers_client::types::Message, id: &ChatId) -> 
         id: id.clone(),
         ts_ms: conv::datetime_to_ms(msg.date()),
         sender,
+        sender_display,
         body: conv::text_to_body(msg.text()),
         // Attachments aren't decoded into local files for history
         // backfill — the message's media reference would still need

@@ -61,6 +61,7 @@ impl MessengerBackend for MockBackend {
         Ok(vec![ConversationSummary {
             id: ChatId::new(self.kind, "mock"),
             title: format!("{} mock", self.kind),
+            display_name: None,
             last_message_ts: None,
             unread: 0,
         }])

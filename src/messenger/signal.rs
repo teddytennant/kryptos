@@ -13,6 +13,7 @@ use async_trait::async_trait;
 use tokio::sync::{broadcast, mpsc, Mutex};
 use tracing::{debug, warn};
 
+use crate::cache::Cache;
 use crate::core::{Error, Result};
 use crate::dbus::stream::{self, Event as SignalEvent};
 use crate::dbus::SignalClient;
@@ -32,6 +33,11 @@ pub struct SignalBackend {
     /// Lazily-started forwarder from the per-account D-Bus signal stream
     /// into our internal broadcast channel.
     forwarder: Mutex<Option<broadcast::Sender<Event>>>,
+    /// Optional shared cache. When set, the backend writes resolved
+    /// contact names into `messenger_contacts` and reads them back as
+    /// the cheap fallback when signal-cli's `getContactName` doesn't
+    /// know the peer (or D-Bus is unreachable on a refresh).
+    cache: Option<Arc<Cache>>,
 }
 
 impl SignalBackend {
@@ -40,7 +46,16 @@ impl SignalBackend {
             client,
             account: account.into(),
             forwarder: Mutex::new(None),
+            cache: None,
         }
+    }
+
+    /// Builder-style: attach a shared [`Cache`] so contact-name
+    /// resolution writes through to `messenger_contacts` (and reads
+    /// from it when signal-cli is offline / unaware of the peer).
+    pub fn with_cache(mut self, cache: Arc<Cache>) -> Self {
+        self.cache = Some(cache);
+        self
     }
 
     /// Resolve the account from `(configured, available)`:
@@ -89,10 +104,11 @@ impl SignalBackend {
         let mut signal_rx = stream::subscribe(&self.client, &self.account).await?;
         let (tx, rx) = broadcast::channel(BROADCAST_CAPACITY);
         let tx_task = tx.clone();
+        let cache = self.cache.clone();
 
         tokio::spawn(async move {
             while let Some(ev) = signal_rx.recv().await {
-                let normalized = match ev {
+                let mut normalized = match ev {
                     SignalEvent::MessageReceived {
                         ts,
                         sender,
@@ -101,6 +117,23 @@ impl SignalBackend {
                         attachments,
                     } => normalize_message_received(ts, sender, group_id, body, attachments),
                 };
+                // Lazy display-name population. signal-cli's
+                // MessageReceived signal does NOT carry sourceName, so
+                // we lean on the cache here: a previous
+                // list_conversations / getContactName already may have
+                // recorded a name for this peer. Whatever's stored
+                // wins; otherwise the UI falls back to the raw E.164
+                // sender. We deliberately don't issue a fresh
+                // getContactName D-Bus call per message — that would
+                // serialise behind the bus on every burst.
+                if let Some(cache) = cache.as_ref() {
+                    if let Ok(Some(name)) = cache
+                        .get_messenger_contact_name(Backend::Signal.as_tag(), &normalized.sender)
+                        .await
+                    {
+                        normalized.sender_display = Some(name);
+                    }
+                }
                 if tx_task.send(Event::MessageReceived(normalized)).is_err() {
                     debug!("signal forwarder: no live subscribers, sleeping");
                     // broadcast::send returns Err only when *currently* nobody
@@ -116,6 +149,46 @@ impl SignalBackend {
     }
 }
 
+/// Resolve a Signal peer's display name. Order of preference:
+///
+/// 1. signal-cli's `getContactName` over D-Bus (authoritative; the
+///    name the user has saved locally).
+/// 2. Whatever's in the cache from a previous resolve (covers the
+///    "bus flaked on this refresh" case so we don't blank out names
+///    we already knew).
+/// 3. `None` — caller falls back to the raw E.164 / UUID.
+///
+/// Successful resolutions are written through to the cache so the
+/// next launch / event has them ready without another bus round
+/// trip.
+pub(crate) async fn resolve_signal_display_name(
+    client: &SignalClient,
+    cache: Option<&Cache>,
+    account: &str,
+    recipient: &str,
+) -> Option<String> {
+    if let Ok(Some(name)) = client.get_contact_name(account, recipient).await {
+        if let Some(cache) = cache {
+            if let Err(e) = cache
+                .upsert_messenger_contact(Backend::Signal.as_tag(), recipient, &name)
+                .await
+            {
+                debug!(error = %e, "messenger_contacts upsert failed");
+            }
+        }
+        return Some(name);
+    }
+    if let Some(cache) = cache {
+        if let Ok(Some(name)) = cache
+            .get_messenger_contact_name(Backend::Signal.as_tag(), recipient)
+            .await
+        {
+            return Some(name);
+        }
+    }
+    None
+}
+
 #[async_trait]
 impl MessengerBackend for SignalBackend {
     fn backend(&self) -> Backend {
@@ -128,16 +201,28 @@ impl MessengerBackend for SignalBackend {
         // dedicated proxy for contacts/groups, surface peer accounts as
         // the conversation list. This is enough to wire UI plumbing.
         let accounts = self.client.list_accounts().await?;
-        Ok(accounts
-            .into_iter()
-            .filter(|a| a != &self.account)
-            .map(|a| ConversationSummary {
+        let mut out = Vec::with_capacity(accounts.len());
+        for a in accounts.into_iter().filter(|a| a != &self.account) {
+            // Resolve a friendly name for the peer (signal-cli
+            // getContactName, with cache as the secondary lookup).
+            // None at the end of this just means "show the E.164
+            // fallback in the UI".
+            let display_name = resolve_signal_display_name(
+                &self.client,
+                self.cache.as_deref(),
+                &self.account,
+                &a,
+            )
+            .await;
+            out.push(ConversationSummary {
                 id: ChatId::new(Backend::Signal, a.clone()),
                 title: a,
+                display_name,
                 last_message_ts: None,
                 unread: 0,
-            })
-            .collect())
+            });
+        }
+        Ok(out)
     }
 
     async fn fetch_history(
@@ -236,6 +321,11 @@ pub(crate) fn normalize_message_received(
         id: ChatId::new(Backend::Signal, conversation_native),
         ts_ms: ts,
         sender,
+        // signal-cli's MessageReceived signal doesn't carry a
+        // sourceName today; the broadcast forwarder enriches this
+        // from the cache before relaying to subscribers (see
+        // `ensure_forwarder`). Until that runs we leave it None.
+        sender_display: None,
         body: if body.is_empty() { None } else { Some(body) },
         attachments,
         backend_extras: BackendExtras::Signal { group_id },
@@ -274,6 +364,11 @@ mod tests {
             msg.backend_extras,
             BackendExtras::Signal { group_id: None }
         ));
+        // signal-cli envelopes don't carry sourceName today, so the
+        // bare normalize path leaves sender_display unset; the
+        // broadcast forwarder enriches it from the cache when one
+        // exists. Lock the default in so tests catch a regression.
+        assert_eq!(msg.sender_display, None);
     }
 
     #[test]

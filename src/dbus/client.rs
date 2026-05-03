@@ -134,6 +134,28 @@ impl SignalClient {
         debug!(%account, group_len = group_id.len(), "send_group_text");
         Ok(proxy.send_group_message(message, &[], group_id).await?)
     }
+
+    /// Look up the locally-stored contact display name for a peer
+    /// (E.164 or UUID). Returns `None` when signal-cli has no name
+    /// recorded — callers fall back to the raw recipient string.
+    ///
+    /// signal-cli reports "unknown" by returning an empty string
+    /// instead of a D-Bus error, so we map both empty-string success
+    /// and any D-Bus failure to `None` here. That keeps the contract
+    /// simple ("name or no name") and means a flaky bus never blanks
+    /// out the chat list.
+    pub async fn get_contact_name(&self, account: &str, recipient: &str) -> Result<Option<String>> {
+        validate_recipient(recipient)?;
+        let proxy = self.account(account).await?;
+        match proxy.get_contact_name(recipient).await {
+            Ok(name) if name.is_empty() => Ok(None),
+            Ok(name) => Ok(Some(name)),
+            Err(e) => {
+                debug!(error = %e, %recipient, "getContactName failed");
+                Ok(None)
+            }
+        }
+    }
 }
 
 /// signal-cli encodes E.164 numbers in the object path by stripping
