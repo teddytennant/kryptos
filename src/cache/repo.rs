@@ -372,6 +372,47 @@ impl Cache {
         Ok(())
     }
 
+    /// Conversations the user has actually exchanged messages with,
+    /// each annotated with the body of the latest message for the
+    /// sidebar preview line. Filters out empty conversation rows
+    /// (no `last_message_ts`) so the sidebar doesn't surface every
+    /// number in signal-cli's contact directory — only the chats
+    /// the user has touched. Sorted newest-first.
+    pub async fn list_active_conversations(
+        &self,
+    ) -> Result<Vec<(Conversation, Option<String>)>> {
+        let rows = sqlx::query(
+            r#"
+            SELECT c.id, c.name, c.group_id, c.last_message_ts,
+                   c.unread_count, c.archived, c.muted_until,
+                   (SELECT body FROM messages
+                    WHERE conversation_id = c.id
+                    ORDER BY ts DESC LIMIT 1) AS last_body
+            FROM conversations c
+            WHERE c.last_message_ts IS NOT NULL
+            ORDER BY c.last_message_ts DESC
+            "#,
+        )
+        .fetch_all(self.pool())
+        .await?;
+
+        let mut out = Vec::with_capacity(rows.len());
+        for row in rows {
+            let conv = Conversation {
+                id: row.try_get("id")?,
+                name: row.try_get("name")?,
+                group_id: row.try_get("group_id")?,
+                last_message_ts: row.try_get("last_message_ts")?,
+                unread_count: row.try_get("unread_count")?,
+                archived: row.try_get("archived")?,
+                muted_until: row.try_get("muted_until")?,
+            };
+            let preview: Option<String> = row.try_get("last_body")?;
+            out.push((conv, preview));
+        }
+        Ok(out)
+    }
+
     /// Wipe every cached row that belongs to a single backend
     /// (`"signal"` or `"telegram"`).  Conversation ids are encoded as
     /// `"<tag>:<native>"` (see `messenger::ChatId::to_wire`), so a

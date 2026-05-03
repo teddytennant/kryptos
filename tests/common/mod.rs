@@ -63,6 +63,7 @@ impl MessengerBackend for MockBackend {
             title: format!("{} mock", self.kind),
             display_name: None,
             last_message_ts: None,
+            preview: None,
             unread: 0,
         }])
     }

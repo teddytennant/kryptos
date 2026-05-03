@@ -82,9 +82,10 @@ impl WindowParts {
                 .last_message_ts
                 .map(format_clock_label)
                 .unwrap_or_default();
+            let preview = c.preview.as_deref().unwrap_or("");
             // Prefer the resolved display name; fall back to the
             // raw `title` (the backend's native id) when none.
-            let row = chat_row(c.label(), "", &ts_label);
+            let row = chat_row(c.label(), preview, &ts_label);
             self.sidebar_list.append(&row);
             self.sidebar_index
                 .borrow_mut()

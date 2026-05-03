@@ -175,6 +175,12 @@ pub struct ConversationSummary {
     /// `None` means "we couldn't resolve a name; fall back to `title`".
     pub display_name: Option<String>,
     pub last_message_ts: Option<i64>,
+    /// Body of the most recent message in this conversation, used as
+    /// the sidebar preview line under the contact name. `None` when
+    /// the backend hasn't surfaced one (live `list_conversations`
+    /// from signal-cli / grammers carries no bodies — only the
+    /// cache-driven path fills this).
+    pub preview: Option<String>,
     pub unread: u32,
 }
 
@@ -279,6 +285,7 @@ mod tests {
             title: "+14155552671".into(),
             display_name: Some("Alice Smith".into()),
             last_message_ts: None,
+            preview: None,
             unread: 0,
         };
         assert_eq!(with_name.label(), "Alice Smith");
@@ -288,6 +295,7 @@ mod tests {
             title: "12345".into(),
             display_name: None,
             last_message_ts: None,
+            preview: None,
             unread: 0,
         };
         assert_eq!(

@@ -284,6 +284,7 @@ impl MessengerBackend for TelegramBackend {
                 title,
                 display_name,
                 last_message_ts,
+                preview: None,
                 unread,
             });
         }

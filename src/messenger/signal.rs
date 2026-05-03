@@ -224,6 +224,7 @@ impl MessengerBackend for SignalBackend {
                 title: n,
                 display_name,
                 last_message_ts: None,
+                preview: None,
                 unread: 0,
             });
         }
@@ -236,6 +237,7 @@ impl MessengerBackend for SignalBackend {
                 title: native,
                 display_name,
                 last_message_ts: None,
+                preview: None,
                 unread: 0,
             });
         }

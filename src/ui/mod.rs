@@ -308,82 +308,54 @@ fn activate(app: &adw::Application) {
 /// Read the cached conversation list synchronously (well — block on the
 /// runtime, the call is fast since SQLite is local) and push it to the
 /// sidebar so the user sees immediate state on cold start.
+///
+/// Only conversations with at least one cached message land in the
+/// sidebar — `list_active_conversations` filters out empty rows and
+/// joins the latest message body in for the preview line.
 fn prime_sidebar_from_cache(ctx: Arc<AsyncCtx>, parts: &WindowParts) {
-    let convs = match ctx.runtime.block_on(ctx.cache.list_conversations()) {
+    let pairs = match ctx.runtime.block_on(ctx.cache.list_active_conversations()) {
         Ok(rows) => rows,
         Err(e) => {
-            warn!(error = %e, "cache list_conversations failed; sidebar starts empty");
+            warn!(error = %e, "cache list_active_conversations failed; sidebar starts empty");
             return;
         }
     };
-    let summaries: Vec<ConversationSummary> = convs.iter().map(conv_row_to_summary).collect();
+    let summaries: Vec<ConversationSummary> = pairs
+        .iter()
+        .map(|(c, preview)| {
+            let mut s = conv_row_to_summary(c);
+            s.preview = preview.clone();
+            s
+        })
+        .collect();
     parts.set_conversations(&summaries);
 }
 
-/// Kick the hub for a fresh conversation list and merge it into the
-/// sidebar + cache. Runs entirely off the GTK thread; results are
-/// marshalled back via `glib::idle_add_local_once`.
-fn spawn_remote_refresh(ctx: Arc<AsyncCtx>, parts: &WindowParts) {
-    let parts_index = parts.sidebar_index.clone();
-    let parts_list = parts.sidebar_list.clone();
-    let parts_scroller = parts.sidebar_scroller.clone();
-    let parts_empty = parts.sidebar_empty.clone();
-
+/// Refresh contact display names from the backend without touching
+/// the conversations cache.  The sidebar is fed solely from
+/// `list_active_conversations` (chats with at least one message),
+/// so we deliberately don't push the backend's list of every known
+/// number into either the cache or the sidebar — otherwise every
+/// E.164 the daemon has ever heard of would clutter the chat list.
+///
+/// What this DOES do: pull the backend's resolved
+/// `display_name`s for known peers and write them to
+/// `messenger_contacts`. That way when an existing chat row gets
+/// re-rendered, the friendly name shows up instead of the raw
+/// E.164 / numeric id.
+fn spawn_remote_refresh(ctx: Arc<AsyncCtx>, _parts: &WindowParts) {
     let hub = ctx.hub.clone();
     let cache = ctx.cache.clone();
 
-    let (tx, rx) = std::sync::mpsc::channel::<Vec<ConversationSummary>>();
     ctx.runtime.spawn(async move {
         let convs = hub.list_all_conversations().await;
-        // Write through to the cache so a future cold start has them.
         for c in &convs {
-            // Prefer the resolved display name in `name` so cold-start
-            // restoration shows the friendly label even before the
-            // remote refresh completes.
-            let cached_name = c
-                .display_name
-                .clone()
-                .unwrap_or_else(|| c.title.clone());
-            let _ = cache
-                .upsert_conversation(&Conversation {
-                    id: c.id.to_wire(),
-                    name: Some(cached_name),
-                    group_id: None,
-                    last_message_ts: c.last_message_ts,
-                    unread_count: c.unread as i32,
-                    archived: false,
-                    muted_until: None,
-                })
-                .await;
-            // Persist into the per-backend contacts directory too so
-            // signal-cli's `getContactName` results survive across
-            // restarts and the Telegram dialog list seeds the lazy
-            // event-side enrichment.
             if let Some(name) = c.display_name.as_deref() {
                 let _ = cache
                     .upsert_messenger_contact(c.id.backend.as_tag(), &c.id.native, name)
                     .await;
             }
         }
-        let _ = tx.send(convs);
-    });
-
-    glib::source::timeout_add_local(Duration::from_millis(150), move || match rx.try_recv() {
-        Ok(convs) => {
-            // Replace the sidebar list in place (we can't borrow
-            // WindowParts here since it isn't 'static, so reuse the
-            // cloned widget handles).
-            let parts = WindowPartsLite {
-                sidebar_list: parts_list.clone(),
-                sidebar_scroller: parts_scroller.clone(),
-                sidebar_empty: parts_empty.clone(),
-                sidebar_index: parts_index.clone(),
-            };
-            parts.set_conversations(&convs);
-            glib::ControlFlow::Break
-        }
-        Err(std::sync::mpsc::TryRecvError::Empty) => glib::ControlFlow::Continue,
-        Err(std::sync::mpsc::TryRecvError::Disconnected) => glib::ControlFlow::Break,
     });
 }
 
@@ -443,6 +415,7 @@ fn spawn_event_subscription(
                         title: msg.id.native.clone(),
                         display_name: msg.sender_display.clone(),
                         last_message_ts: Some(msg.ts_ms),
+                        preview: msg.body.clone(),
                         unread: 0,
                     };
                     let parts = WindowPartsLite {
@@ -849,32 +822,6 @@ struct WindowPartsLite {
 }
 
 impl WindowPartsLite {
-    fn set_conversations(&self, convs: &[ConversationSummary]) {
-        while let Some(row) = self.sidebar_list.row_at_index(0) {
-            self.sidebar_list.remove(&row);
-        }
-        self.sidebar_index.borrow_mut().clear();
-        for c in convs {
-            let ts_label = c
-                .last_message_ts
-                .map(window::format_clock_label)
-                .unwrap_or_default();
-            let row = window::chat_row(c.label(), "", &ts_label);
-            self.sidebar_list.append(&row);
-            self.sidebar_index
-                .borrow_mut()
-                .push((c.id.clone(), row.clone()));
-        }
-        let has_rows = self.sidebar_list.row_at_index(0).is_some();
-        self.sidebar_scroller.set_visible(has_rows);
-        self.sidebar_empty.set_visible(!has_rows);
-        if has_rows && self.sidebar_list.selected_row().is_none() {
-            if let Some(first) = self.sidebar_list.row_at_index(0) {
-                self.sidebar_list.select_row(Some(&first));
-            }
-        }
-    }
-
     fn upsert_conversation(&self, summary: &ConversationSummary) {
         let existing = {
             let idx = self.sidebar_index.borrow();
@@ -890,7 +837,8 @@ impl WindowPartsLite {
             .last_message_ts
             .map(window::format_clock_label)
             .unwrap_or_default();
-        let row = window::chat_row(summary.label(), "", &ts_label);
+        let preview = summary.preview.as_deref().unwrap_or("");
+        let row = window::chat_row(summary.label(), preview, &ts_label);
         self.sidebar_list.prepend(&row);
         self.sidebar_index
             .borrow_mut()
@@ -1018,6 +966,7 @@ fn conv_row_to_summary(c: &Conversation) -> ConversationSummary {
         title: title_or_native,
         display_name,
         last_message_ts: c.last_message_ts,
+        preview: None,
         unread: c.unread_count.max(0) as u32,
     }
 }
