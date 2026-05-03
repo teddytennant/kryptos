@@ -143,6 +143,12 @@ impl Dispatcher {
             Command::Settings => Settings::open(&self.window),
             Command::Link(_) => onboarding::open_linker(&self.window),
             Command::TelegramLogin => onboarding::present_telegram_login(&self.window, None),
+            Command::Backends => onboarding::present_backends_panel(&self.window),
+            Command::Onboard => {
+                let window = self.window.clone();
+                let config_path = self.config_path.clone();
+                onboarding::present_welcome(&window, config_path, || {});
+            }
             Command::Help => self.toast_info(help_text()),
             Command::Unknown(head) => self.toast_error(&format!("unknown command: :{head}")),
         }

@@ -30,6 +30,12 @@ pub enum Command {
     /// Open the interactive Telegram login dialog. Always reads phone /
     /// code / 2FA from a fresh entry; carries no args today.
     TelegramLogin,
+    /// Re-run the welcome / first-run wizard on demand, even after
+    /// `onboarding.completed = true`. Useful when the user wants to
+    /// switch backends or re-pair a device.
+    Onboard,
+    /// Open the backends panel (Signal + Telegram management).
+    Backends,
     Help,
     Unknown(String),
 }
@@ -67,6 +73,8 @@ pub fn parse_command(line: &str) -> Command {
             }
         }
         "telegram-login" | "telegram" | "tg-login" => Command::TelegramLogin,
+        "onboard" | "welcome" | "setup" => Command::Onboard,
+        "backends" | "messengers" | "accounts" => Command::Backends,
         "help" => Command::Help,
         other => Command::Unknown(other.to_string()),
     }
@@ -174,7 +182,7 @@ where
 
 /// Render the supported-commands hint shown by `:help`.
 pub fn help_text() -> &'static str {
-    ":q :w :theme <name> :set <key>[=<v>] :reload :settings :link <name> :telegram-login :help"
+    ":q :w :theme <name> :set <key>[=<v>] :reload :settings :backends :link <name> :telegram-login :onboard :help"
 }
 
 /// Comma-separated list of valid theme names, for error toasts.

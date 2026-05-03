@@ -74,6 +74,90 @@ pub fn open_linker(parent: &impl IsA<gtk::Window>) {
     LinkerWindow::build(parent.as_ref()).present();
 }
 
+/// One-stop backends panel: the user picks Signal or Telegram and the
+/// right flow opens. Replaces the old "header link button drops you
+/// straight into the Signal QR" UX, which left no path to Telegram
+/// once `onboarding.completed = true`.
+pub fn present_backends_panel(parent: &impl IsA<gtk::Window>) {
+    let win = adw::Window::builder()
+        .transient_for(parent.as_ref())
+        .modal(true)
+        .default_width(440)
+        .default_height(320)
+        .title("Backends")
+        .build();
+    win.add_css_class("kryptos-backends");
+
+    let header = adw::HeaderBar::builder().show_title(true).build();
+    header.add_css_class("flat");
+
+    let intro = gtk::Label::builder()
+        .label("Connect or manage your messaging accounts. You can come back here anytime from the header bar.")
+        .halign(gtk::Align::Start)
+        .wrap(true)
+        .wrap_mode(gtk::pango::WrapMode::WordChar)
+        .xalign(0.0)
+        .build();
+    intro.add_css_class("body");
+    intro.add_css_class("dim-label");
+
+    let listbox = gtk::ListBox::new();
+    listbox.set_selection_mode(gtk::SelectionMode::None);
+    listbox.add_css_class("boxed-list");
+
+    let signal_row = adw::ActionRow::builder()
+        .title("Signal")
+        .subtitle("Link Kryptos to your Signal account on the phone")
+        .build();
+    let signal_btn = gtk::Button::with_label("Link…");
+    signal_btn.set_valign(gtk::Align::Center);
+    signal_btn.add_css_class("flat");
+    signal_row.add_suffix(&signal_btn);
+    signal_row.set_activatable_widget(Some(&signal_btn));
+    {
+        let win_for_signal = win.clone();
+        signal_btn.connect_clicked(move |_| {
+            open_linker(&win_for_signal);
+        });
+    }
+
+    let telegram_row = adw::ActionRow::builder()
+        .title("Telegram")
+        .subtitle("Sign in with phone number, code, and 2FA")
+        .build();
+    let telegram_btn = gtk::Button::with_label("Set up…");
+    telegram_btn.set_valign(gtk::Align::Center);
+    telegram_btn.add_css_class("flat");
+    telegram_row.add_suffix(&telegram_btn);
+    telegram_row.set_activatable_widget(Some(&telegram_btn));
+    {
+        let win_for_tg = win.clone();
+        telegram_btn.connect_clicked(move |_| {
+            present_telegram_login(&win_for_tg, None);
+        });
+    }
+
+    listbox.append(&signal_row);
+    listbox.append(&telegram_row);
+
+    let body = gtk::Box::builder()
+        .orientation(gtk::Orientation::Vertical)
+        .spacing(20)
+        .build();
+    body.set_margin_start(28);
+    body.set_margin_end(28);
+    body.set_margin_top(20);
+    body.set_margin_bottom(24);
+    body.append(&intro);
+    body.append(&listbox);
+
+    let toolbar = adw::ToolbarView::new();
+    toolbar.add_top_bar(&header);
+    toolbar.set_content(Some(&body));
+    win.set_content(Some(&toolbar));
+    win.present();
+}
+
 // ---------------------------------------------------------------------------
 // Window construction
 // ---------------------------------------------------------------------------
@@ -446,6 +530,20 @@ fn spawn_link_flow(handles: LinkFlowHandles) {
                     });
                     return glib::ControlFlow::Break;
                 }
+                Ok(LinkEvent::AlreadyLinked(account)) => {
+                    info!(%account, "linker invoked but account already linked; short-circuit");
+                    spinner_for_tick.stop();
+                    spinner_for_tick.set_visible(false);
+                    *qr_state_for_tick.borrow_mut() = QrState::Idle;
+                    qr_area_for_tick.queue_draw();
+                    uri_label_for_tick.set_text("");
+                    copy_btn_for_tick.set_visible(false);
+                    status_label_for_tick.set_text(&format!(
+                        "Already linked as {account}. You're all set — close this window to use Kryptos.",
+                    ));
+                    unlock_inputs(&generate_btn_for_tick, &name_entry_for_tick);
+                    return glib::ControlFlow::Break;
+                }
                 Ok(LinkEvent::TimedOut) => {
                     warn!("link flow timed out");
                     spinner_for_tick.stop();
@@ -504,6 +602,10 @@ fn wire_copy_button(copy_btn: &gtk::Button, uri: &str, status_label: &gtk::Label
 enum LinkEvent {
     Uri(String),
     Linked(String),
+    /// signal-cli already has at least one account; the linker doesn't
+    /// need to run. Carries the existing account's E.164 number so the
+    /// UI can tell the user what they're already linked as.
+    AlreadyLinked(String),
     TimedOut,
     Error(String),
 }
@@ -543,6 +645,19 @@ fn run_link_flow(device_name: &str, tx: &mpsc::Sender<LinkEvent>) {
                 std::collections::HashSet::new()
             }
         };
+
+        // signal-cli's `link` registers a NEW account; it does nothing
+        // for an account already known to the daemon. Without this
+        // short-circuit the user sees "Waiting for your phone..." for
+        // 5 minutes because `detect_new_account` can never observe a
+        // delta — `before` and `now` both contain the same account.
+        if !before.is_empty() {
+            let mut sorted: Vec<String> = before.iter().cloned().collect();
+            sorted.sort();
+            let account = sorted.into_iter().next().unwrap_or_default();
+            let _ = tx.send(LinkEvent::AlreadyLinked(account));
+            return;
+        }
 
         let uri = match client.link(device_name).await {
             Ok(u) => u,

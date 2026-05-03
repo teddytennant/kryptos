@@ -243,7 +243,7 @@ pub fn build(app: &adw::Application, cfg: &Config) -> WindowParts {
     prefs_button.connect_clicked(move |_| Settings::open(&win_for_prefs));
 
     let win_for_link = window.clone();
-    link_button.connect_clicked(move |_| onboarding::open_linker(&win_for_link));
+    link_button.connect_clicked(move |_| onboarding::present_backends_panel(&win_for_link));
 
     install_styles();
 
@@ -447,8 +447,8 @@ fn build_content() -> (
     prefs_button.set_tooltip_text(Some("Preferences"));
     prefs_button.add_css_class("flat");
 
-    let link_button = gtk::Button::from_icon_name("phone-symbolic");
-    link_button.set_tooltip_text(Some("Link new device"));
+    let link_button = gtk::Button::from_icon_name("network-workgroup-symbolic");
+    link_button.set_tooltip_text(Some("Backends"));
     link_button.add_css_class("flat");
 
     header.pack_end(&prefs_button);
