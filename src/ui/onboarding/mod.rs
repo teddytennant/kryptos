@@ -74,16 +74,20 @@ pub fn open_linker(parent: &impl IsA<gtk::Window>) {
     LinkerWindow::build(parent.as_ref()).present();
 }
 
-/// One-stop backends panel: the user picks Signal or Telegram and the
-/// right flow opens. Replaces the old "header link button drops you
-/// straight into the Signal QR" UX, which left no path to Telegram
-/// once `onboarding.completed = true`.
+/// One-stop backends panel.
+///
+/// Renders the two messengers with live "Connected as …" status, and
+/// for already-connected backends offers a fork: keep using the local
+/// cache as-is, or wipe it and re-sync from the server with the same
+/// account.  The status probe is async (signal-cli D-Bus + a config
+/// + session-file check for Telegram), so the rows render as
+/// "Checking…" until the worker thread reports back.
 pub fn present_backends_panel(parent: &impl IsA<gtk::Window>) {
     let win = adw::Window::builder()
         .transient_for(parent.as_ref())
         .modal(true)
-        .default_width(440)
-        .default_height(320)
+        .default_width(520)
+        .default_height(420)
         .title("Backends")
         .build();
     win.add_css_class("kryptos-backends");
@@ -92,7 +96,7 @@ pub fn present_backends_panel(parent: &impl IsA<gtk::Window>) {
     header.add_css_class("flat");
 
     let intro = gtk::Label::builder()
-        .label("Connect or manage your messaging accounts. You can come back here anytime from the header bar.")
+        .label("Manage your messaging accounts. Connected backends can keep their cached conversations, or start fresh with the same account.")
         .halign(gtk::Align::Start)
         .wrap(true)
         .wrap_mode(gtk::pango::WrapMode::WordChar)
@@ -107,39 +111,24 @@ pub fn present_backends_panel(parent: &impl IsA<gtk::Window>) {
 
     let signal_row = adw::ActionRow::builder()
         .title("Signal")
-        .subtitle("Link Kryptos to your Signal account on the phone")
+        .subtitle("Checking…")
         .build();
-    let signal_btn = gtk::Button::with_label("Link…");
-    signal_btn.set_valign(gtk::Align::Center);
-    signal_btn.add_css_class("flat");
-    signal_row.add_suffix(&signal_btn);
-    signal_row.set_activatable_widget(Some(&signal_btn));
-    {
-        let win_for_signal = win.clone();
-        signal_btn.connect_clicked(move |_| {
-            open_linker(&win_for_signal);
-        });
-    }
+    let signal_actions = gtk::Box::new(gtk::Orientation::Horizontal, 6);
+    signal_actions.set_valign(gtk::Align::Center);
+    signal_row.add_suffix(&signal_actions);
 
     let telegram_row = adw::ActionRow::builder()
         .title("Telegram")
-        .subtitle("Sign in with phone number, code, and 2FA")
+        .subtitle("Checking…")
         .build();
-    let telegram_btn = gtk::Button::with_label("Set up…");
-    telegram_btn.set_valign(gtk::Align::Center);
-    telegram_btn.add_css_class("flat");
-    telegram_row.add_suffix(&telegram_btn);
-    telegram_row.set_activatable_widget(Some(&telegram_btn));
-    {
-        let win_for_tg = win.clone();
-        telegram_btn.connect_clicked(move |_| {
-            present_telegram_login(&win_for_tg, None);
-        });
-    }
+    let telegram_actions = gtk::Box::new(gtk::Orientation::Horizontal, 6);
+    telegram_actions.set_valign(gtk::Align::Center);
+    telegram_row.add_suffix(&telegram_actions);
 
     listbox.append(&signal_row);
     listbox.append(&telegram_row);
 
+    let toast_overlay = adw::ToastOverlay::new();
     let body = gtk::Box::builder()
         .orientation(gtk::Orientation::Vertical)
         .spacing(20)
@@ -150,12 +139,357 @@ pub fn present_backends_panel(parent: &impl IsA<gtk::Window>) {
     body.set_margin_bottom(24);
     body.append(&intro);
     body.append(&listbox);
+    toast_overlay.set_child(Some(&body));
 
     let toolbar = adw::ToolbarView::new();
     toolbar.add_top_bar(&header);
-    toolbar.set_content(Some(&body));
+    toolbar.set_content(Some(&toast_overlay));
     win.set_content(Some(&toolbar));
     win.present();
+
+    spawn_backends_probe(BackendsPanelHandles {
+        win: win.clone(),
+        toast_overlay,
+        signal_row,
+        signal_actions,
+        telegram_row,
+        telegram_actions,
+    });
+}
+
+struct BackendsPanelHandles {
+    win: adw::Window,
+    toast_overlay: adw::ToastOverlay,
+    signal_row: adw::ActionRow,
+    signal_actions: gtk::Box,
+    telegram_row: adw::ActionRow,
+    telegram_actions: gtk::Box,
+}
+
+#[derive(Debug, Clone)]
+enum BackendStatus {
+    /// signal-cli reachable + at least one account.
+    Linked { account: String },
+    /// signal-cli reachable but no account / Telegram creds set but
+    /// no usable session yet.
+    NotLinked,
+    /// Backend isn't configured at all (Telegram only — signal-cli
+    /// is always installed in this build).
+    NotConfigured,
+    /// Probe couldn't reach the backend (D-Bus down, etc.). Treat as
+    /// "we don't know"; render with a "Set up" button as a neutral
+    /// fallback.
+    Unknown(String),
+}
+
+#[derive(Debug)]
+struct ProbeResult {
+    signal: BackendStatus,
+    telegram: BackendStatus,
+}
+
+fn spawn_backends_probe(handles: BackendsPanelHandles) {
+    let (tx, rx) = mpsc::channel::<ProbeResult>();
+
+    std::thread::Builder::new()
+        .name("kryptos-backends-probe".into())
+        .spawn(move || {
+            let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                run_backends_probe()
+            }));
+            let probe = result.unwrap_or_else(|_| ProbeResult {
+                signal: BackendStatus::Unknown("probe panicked".into()),
+                telegram: BackendStatus::Unknown("probe panicked".into()),
+            });
+            let _ = tx.send(probe);
+        })
+        .expect("spawn kryptos-backends-probe thread");
+
+    let BackendsPanelHandles {
+        win,
+        toast_overlay,
+        signal_row,
+        signal_actions,
+        telegram_row,
+        telegram_actions,
+    } = handles;
+
+    glib::source::timeout_add_local(Duration::from_millis(120), move || match rx.try_recv() {
+        Ok(result) => {
+            apply_backend_status(
+                &win,
+                &toast_overlay,
+                &signal_row,
+                &signal_actions,
+                "signal",
+                &result.signal,
+            );
+            apply_backend_status(
+                &win,
+                &toast_overlay,
+                &telegram_row,
+                &telegram_actions,
+                "telegram",
+                &result.telegram,
+            );
+            glib::ControlFlow::Break
+        }
+        Err(mpsc::TryRecvError::Empty) => glib::ControlFlow::Continue,
+        Err(mpsc::TryRecvError::Disconnected) => glib::ControlFlow::Break,
+    });
+}
+
+fn run_backends_probe() -> ProbeResult {
+    let rt = match tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+    {
+        Ok(rt) => rt,
+        Err(e) => {
+            return ProbeResult {
+                signal: BackendStatus::Unknown(format!("tokio: {e}")),
+                telegram: BackendStatus::Unknown(format!("tokio: {e}")),
+            };
+        }
+    };
+    rt.block_on(async {
+        ProbeResult {
+            signal: probe_signal().await,
+            telegram: probe_telegram().await,
+        }
+    })
+}
+
+async fn probe_signal() -> BackendStatus {
+    let client = match SignalClient::connect().await {
+        Ok(c) => c,
+        Err(e) => return BackendStatus::Unknown(format!("D-Bus: {e}")),
+    };
+    if let Err(e) = crate::dbus::ensure_running(client.connection()).await {
+        return BackendStatus::Unknown(format!("signal-cli: {e}"));
+    }
+    match client.list_accounts().await {
+        Ok(list) if !list.is_empty() => {
+            let mut sorted = list;
+            sorted.sort();
+            BackendStatus::Linked {
+                account: sorted.into_iter().next().unwrap_or_default(),
+            }
+        }
+        Ok(_) => BackendStatus::NotLinked,
+        Err(e) => BackendStatus::Unknown(format!("listAccounts: {e}")),
+    }
+}
+
+async fn probe_telegram() -> BackendStatus {
+    let cfg_path = match crate::config::loader::default_path() {
+        Ok(p) => p,
+        Err(e) => return BackendStatus::Unknown(format!("config path: {e}")),
+    };
+    let cfg = match crate::config::loader::load_or_default(&cfg_path) {
+        Ok(c) => c,
+        Err(e) => return BackendStatus::Unknown(format!("load config: {e}")),
+    };
+    if cfg.backends.telegram.api_id == 0 || cfg.backends.telegram.api_hash.is_empty() {
+        return BackendStatus::NotConfigured;
+    }
+    let session_path =
+        crate::messenger::telegram::resolve_session_path(&cfg.backends.telegram.session_path);
+    if !session_path.exists() {
+        return BackendStatus::NotLinked;
+    }
+    BackendStatus::Linked {
+        account: "your account".into(),
+    }
+}
+
+fn clear_box(b: &gtk::Box) {
+    while let Some(child) = b.first_child() {
+        b.remove(&child);
+    }
+}
+
+fn apply_backend_status(
+    panel_win: &adw::Window,
+    toast: &adw::ToastOverlay,
+    row: &adw::ActionRow,
+    actions: &gtk::Box,
+    tag: &'static str,
+    status: &BackendStatus,
+) {
+    clear_box(actions);
+    let label = backend_label(tag);
+    match status {
+        BackendStatus::Linked { account } => {
+            row.set_subtitle(&format!("Connected as {account}"));
+            row.add_css_class("kryptos-backend-connected");
+
+            let restore = gtk::Button::with_label("Use existing");
+            restore.set_valign(gtk::Align::Center);
+            restore.add_css_class("flat");
+            restore.set_tooltip_text(Some(&format!(
+                "Keep cached {label} conversations and pull updates as they arrive."
+            )));
+            {
+                let panel_win = panel_win.clone();
+                let toast = toast.clone();
+                let label = label.to_string();
+                restore.connect_clicked(move |_| {
+                    show_panel_toast(&toast, &format!("Restored — keeping cached {label} chats."));
+                    let win = panel_win.clone();
+                    glib::source::timeout_add_local_once(Duration::from_millis(700), move || {
+                        win.close();
+                    });
+                });
+            }
+
+            let fresh = gtk::Button::with_label("Start fresh");
+            fresh.set_valign(gtk::Align::Center);
+            fresh.add_css_class("destructive-action");
+            fresh.set_tooltip_text(Some(&format!(
+                "Wipe local {label} cache. Same account; conversations repopulate from the server."
+            )));
+            {
+                let panel_win = panel_win.clone();
+                let toast = toast.clone();
+                fresh.connect_clicked(move |_| {
+                    confirm_start_fresh(&panel_win, &toast, tag);
+                });
+            }
+
+            actions.append(&restore);
+            actions.append(&fresh);
+        }
+        BackendStatus::NotLinked | BackendStatus::NotConfigured => {
+            let subtitle = match (tag, status) {
+                ("signal", _) => "Not linked yet — pair Kryptos with your phone.",
+                ("telegram", BackendStatus::NotConfigured) => {
+                    "Not set up yet — needs api_id / api_hash from my.telegram.org."
+                }
+                ("telegram", _) => "Credentials stored, but the session needs a sign-in.",
+                _ => "Not configured yet.",
+            };
+            row.set_subtitle(subtitle);
+            row.remove_css_class("kryptos-backend-connected");
+
+            let setup = gtk::Button::with_label("Set up…");
+            setup.set_valign(gtk::Align::Center);
+            setup.add_css_class("suggested-action");
+            let panel_win = panel_win.clone();
+            setup.connect_clicked(move |_| match tag {
+                "signal" => open_linker(&panel_win),
+                "telegram" => present_telegram_login(&panel_win, None),
+                _ => {}
+            });
+            actions.append(&setup);
+        }
+        BackendStatus::Unknown(reason) => {
+            row.set_subtitle(&format!("Status unknown — {reason}"));
+            row.remove_css_class("kryptos-backend-connected");
+
+            let setup = gtk::Button::with_label("Set up…");
+            setup.set_valign(gtk::Align::Center);
+            setup.add_css_class("flat");
+            let panel_win = panel_win.clone();
+            setup.connect_clicked(move |_| match tag {
+                "signal" => open_linker(&panel_win),
+                "telegram" => present_telegram_login(&panel_win, None),
+                _ => {}
+            });
+            actions.append(&setup);
+        }
+    }
+}
+
+fn backend_label(tag: &str) -> &'static str {
+    match tag {
+        "signal" => "Signal",
+        "telegram" => "Telegram",
+        _ => "this backend",
+    }
+}
+
+fn show_panel_toast(overlay: &adw::ToastOverlay, msg: &str) {
+    overlay.add_toast(adw::Toast::builder().title(msg).timeout(3).build());
+}
+
+fn confirm_start_fresh(parent: &adw::Window, toast: &adw::ToastOverlay, tag: &'static str) {
+    let label = backend_label(tag);
+    let dialog = adw::AlertDialog::builder()
+        .heading(format!("Start fresh with {label}?"))
+        .body(format!(
+            "This wipes Kryptos's local copy of your {label} conversations, messages, and contacts. \
+             Your account stays signed in; messages will repopulate from the server."
+        ))
+        .build();
+    dialog.add_response("cancel", "Cancel");
+    dialog.add_response("wipe", "Start fresh");
+    dialog.set_response_appearance("wipe", adw::ResponseAppearance::Destructive);
+    dialog.set_default_response(Some("cancel"));
+    dialog.set_close_response("cancel");
+
+    let toast = toast.clone();
+    let parent_for_wipe = parent.clone();
+    dialog.connect_response(None, move |dlg, response| {
+        if response == "wipe" {
+            spawn_backend_wipe(toast.clone(), parent_for_wipe.clone(), tag);
+        }
+        dlg.close();
+    });
+    dialog.present(Some(parent));
+}
+
+fn spawn_backend_wipe(toast: adw::ToastOverlay, parent: adw::Window, tag: &'static str) {
+    let (tx, rx) = mpsc::channel::<std::result::Result<(), String>>();
+    std::thread::Builder::new()
+        .name("kryptos-backend-wipe".into())
+        .spawn(move || {
+            let res = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                let rt = tokio::runtime::Builder::new_current_thread()
+                    .enable_all()
+                    .build()
+                    .map_err(|e| format!("tokio: {e}"))?;
+                rt.block_on(async {
+                    let path = crate::cache::Cache::default_path()
+                        .map_err(|e| format!("cache path: {e}"))?;
+                    let cache = crate::cache::Cache::open(&path)
+                        .await
+                        .map_err(|e| format!("open cache: {e}"))?;
+                    cache
+                        .clear_backend(tag)
+                        .await
+                        .map_err(|e| format!("clear: {e}"))
+                })
+            }))
+            .unwrap_or_else(|_| Err("wipe worker panicked".to_string()));
+            let _ = tx.send(res);
+        })
+        .expect("spawn kryptos-backend-wipe thread");
+
+    let label = backend_label(tag);
+    glib::source::timeout_add_local(
+        Duration::from_millis(120),
+        move || match rx.try_recv() {
+            Ok(Ok(())) => {
+                show_panel_toast(
+                    &toast,
+                    &format!("Cleared local {label} cache. Restart Kryptos to re-sync."),
+                );
+                let win = parent.clone();
+                glib::source::timeout_add_local_once(Duration::from_millis(900), move || {
+                    win.close();
+                });
+                glib::ControlFlow::Break
+            }
+            Ok(Err(e)) => {
+                error!(error = %e, backend = tag, "backend wipe failed");
+                show_panel_toast(&toast, &format!("Couldn't clear {label}: {e}"));
+                glib::ControlFlow::Break
+            }
+            Err(mpsc::TryRecvError::Empty) => glib::ControlFlow::Continue,
+            Err(mpsc::TryRecvError::Disconnected) => glib::ControlFlow::Break,
+        },
+    );
 }
 
 // ---------------------------------------------------------------------------

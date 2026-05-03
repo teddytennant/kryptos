@@ -371,6 +371,30 @@ impl Cache {
         .await?;
         Ok(())
     }
+
+    /// Wipe every cached row that belongs to a single backend
+    /// (`"signal"` or `"telegram"`).  Conversation ids are encoded as
+    /// `"<tag>:<native>"` (see `messenger::ChatId::to_wire`), so a
+    /// `LIKE 'tag:%'` filter scopes the delete cleanly.  Attachments
+    /// and reactions cascade through `messages`.
+    pub async fn clear_backend(&self, backend_tag: &str) -> Result<()> {
+        let pat = format!("{backend_tag}:%");
+        let mut tx = self.pool().begin().await?;
+        sqlx::query("DELETE FROM messages WHERE conversation_id LIKE ?")
+            .bind(&pat)
+            .execute(&mut *tx)
+            .await?;
+        sqlx::query("DELETE FROM conversations WHERE id LIKE ?")
+            .bind(&pat)
+            .execute(&mut *tx)
+            .await?;
+        sqlx::query("DELETE FROM messenger_contacts WHERE backend = ?")
+            .bind(backend_tag)
+            .execute(&mut *tx)
+            .await?;
+        tx.commit().await?;
+        Ok(())
+    }
 }
 
 /// Current wall-clock time in unix milliseconds. Pulled into a
