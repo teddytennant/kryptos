@@ -18,7 +18,7 @@ pub mod settings;
 mod statusline;
 mod window;
 
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 use std::sync::Arc;
 use std::time::Duration;
@@ -227,7 +227,12 @@ fn activate(app: &adw::Application) {
     // `tokio::sync::watch` channel; we poll it on the GTK main loop so
     // mutations to `theme` (a non-`Send` `Rc<RefCell<_>>`) stay on the
     // GTK thread.
-    spawn_config_watcher(config_path.clone(), theme.clone());
+    spawn_config_watcher(
+        config_path.clone(),
+        theme.clone(),
+        parts.messages_box.clone(),
+        cfg.appearance.message_bubbles,
+    );
 
     let async_ctx = AsyncCtx::try_build(&cfg);
 
@@ -778,7 +783,12 @@ fn wire_composer_send(
 /// into the timeout closure so its lifetime matches the application.
 /// Errors creating the watcher are logged and degrade gracefully: the
 /// app keeps running, just without live reload.
-fn spawn_config_watcher(config_path: std::path::PathBuf, theme: Rc<RefCell<ThemeManager>>) {
+fn spawn_config_watcher(
+    config_path: std::path::PathBuf,
+    theme: Rc<RefCell<ThemeManager>>,
+    messages_box: gtk::Box,
+    initial_bubbles: bool,
+) {
     let watcher = match ConfigWatcher::new(config_path) {
         Ok(w) => w,
         Err(e) => {
@@ -797,6 +807,7 @@ fn spawn_config_watcher(config_path: std::path::PathBuf, theme: Rc<RefCell<Theme
     // it — but it must stay owned; dropping it would tear down the
     // background machinery.
     let _watcher_keepalive = watcher;
+    let last_bubbles = Rc::new(Cell::new(initial_bubbles));
 
     glib::source::timeout_add_local(Duration::from_millis(200), move || {
         if !rx.has_changed().unwrap_or(false) {
@@ -810,6 +821,14 @@ fn spawn_config_watcher(config_path: std::path::PathBuf, theme: Rc<RefCell<Theme
                 Ok(()) => info!(theme = %new_cfg.general.theme, "theme hot-reloaded"),
                 Err(e) => warn!(error = %e, "live theme reload failed"),
             }
+        }
+        if new_cfg.appearance.message_bubbles != last_bubbles.get() {
+            window::apply_bubble_class(&messages_box, new_cfg.appearance.message_bubbles);
+            last_bubbles.set(new_cfg.appearance.message_bubbles);
+            info!(
+                bubbles = new_cfg.appearance.message_bubbles,
+                "message-bubble setting hot-reloaded"
+            );
         }
         // Anchor the watcher's lifetime to this closure.
         let _ = &_watcher_keepalive;

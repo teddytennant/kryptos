@@ -19,6 +19,7 @@ use std::cell::RefCell;
 use std::collections::hash_map::DefaultHasher;
 use std::hash::{Hash, Hasher};
 use std::rc::Rc;
+use std::time::Duration;
 
 use adw::prelude::*;
 use gtk::glib;
@@ -173,17 +174,42 @@ pub(super) fn is_near_bottom(scroller: &gtk::ScrolledWindow) -> bool {
     (upper - (value + page)) <= NEAR_BOTTOM_PX
 }
 
-/// Schedule a scroll-to-bottom on the next idle tick. We defer because
-/// `gtk::Box::append` only updates layout asynchronously — reading the
-/// vadjustment immediately would still see the pre-append upper bound,
-/// so the scroll would land short of the new last row.
+/// Schedule a scroll-to-bottom after `gtk::Box::append`.
+///
+/// Two scrolls are queued: one at the next idle (for the common case
+/// where layout has already settled) and a 100 ms backup. The append
+/// kicks off a layout pass; sometimes our idle fires *before* the
+/// scrolled window's vadjustment.upper has been recomputed — in that
+/// case the idle scrolls to a stale target and the new last row stays
+/// off-screen. The timeout catches up after layout has definitively
+/// completed, so the user always lands at the bottom.
 pub(super) fn scroll_to_bottom_idle(scroller: &gtk::ScrolledWindow) {
-    let scroller = scroller.clone();
-    glib::idle_add_local_once(move || {
-        let adj = scroller.vadjustment();
-        let target = (adj.upper() - adj.page_size()).max(adj.lower());
-        adj.set_value(target);
-    });
+    schedule_scroll_to_bottom(scroller);
+}
+
+fn schedule_scroll_to_bottom(scroller: &gtk::ScrolledWindow) {
+    let s1 = scroller.clone();
+    glib::idle_add_local_once(move || pin_to_bottom(&s1));
+    let s2 = scroller.clone();
+    glib::source::timeout_add_local_once(Duration::from_millis(100), move || pin_to_bottom(&s2));
+}
+
+fn pin_to_bottom(scroller: &gtk::ScrolledWindow) {
+    let adj = scroller.vadjustment();
+    let target = (adj.upper() - adj.page_size()).max(adj.lower());
+    adj.set_value(target);
+}
+
+/// Toggle the `.no-bubbles` class on the messages box so the
+/// `appearance.message_bubbles` setting actually changes the
+/// rendering. Called once at window build and again whenever the
+/// config watcher sees a change.
+pub(super) fn apply_bubble_class(messages_box: &gtk::Box, bubbles: bool) {
+    if bubbles {
+        messages_box.remove_css_class("no-bubbles");
+    } else {
+        messages_box.add_css_class("no-bubbles");
+    }
 }
 
 pub fn build(app: &adw::Application, cfg: &Config) -> WindowParts {
@@ -238,6 +264,8 @@ pub fn build(app: &adw::Application, cfg: &Config) -> WindowParts {
     if cfg.general.start_maximized {
         window.set_maximized(true);
     }
+
+    apply_bubble_class(&messages_box, cfg.appearance.message_bubbles);
 
     let win_for_prefs = window.clone();
     prefs_button.connect_clicked(move |_| Settings::open(&win_for_prefs));
@@ -917,6 +945,17 @@ windowcontrols button {
     line-height: 1.5;
     box-shadow: none;
 }
+/* Fallback bubble colors for theme="system" — kryptos themes
+   override these in their own CSS files. Uses libadwaita tokens so
+   the bubble adapts to light + dark system themes automatically. */
+.bubble-mine {
+    background-color: @accent_bg_color;
+    color: @accent_fg_color;
+}
+.bubble-theirs {
+    background-color: alpha(currentColor, 0.08);
+    color: inherit;
+}
 /* Tighten the corner that points toward the cluster: for same-sender
    runs, the inside corners drop to 6px so the cluster reads as one. */
 .bubble-mine.cluster-top    { border-bottom-right-radius: 6px; }
@@ -931,6 +970,21 @@ windowcontrols button {
     border-bottom-left-radius: 6px;
 }
 .bubble-theirs.cluster-bottom { border-top-left-radius: 6px; }
+
+/* When `appearance.message_bubbles = false`, the messages_box gets a
+   `.no-bubbles` class. Strip the bubble chrome so messages render as
+   tight rows of text — the alignment still carries authorship. */
+.kryptos-messages.no-bubbles .bubble,
+.kryptos-messages.no-bubbles .bubble-mine,
+.kryptos-messages.no-bubbles .bubble-theirs {
+    background-color: transparent;
+    color: inherit;
+    padding: 2px 0;
+    border-radius: 0;
+}
+.kryptos-messages.no-bubbles .message-row {
+    margin: 1px 0;
+}
 
 /* ── Date dividers ─────────────────────────────────────────────────── */
 .date-divider {
