@@ -39,6 +39,9 @@ pub struct WindowParts {
     pub sidebar_scroller: gtk::ScrolledWindow,
     pub sidebar_empty: gtk::Widget,
     pub composer: Composer,
+    /// "+" button in the sidebar header. Wired in `mod.rs` to open
+    /// the new-chat dialog.
+    pub compose_btn: gtk::Button,
     pub mode_line: ModeLine,
     pub command_bar: CommandBar,
     pub toast_overlay: adw::ToastOverlay,
@@ -224,7 +227,8 @@ pub fn build(app: &adw::Application, cfg: &Config) -> WindowParts {
     let sidebar_list = build_sidebar_list();
     let sidebar_search = build_sidebar_search();
     let sidebar_empty = build_sidebar_empty_state();
-    let (sidebar, sidebar_scroller) = build_sidebar(&sidebar_list, &sidebar_search, &sidebar_empty);
+    let (sidebar, sidebar_scroller, compose_btn) =
+        build_sidebar(&sidebar_list, &sidebar_search, &sidebar_empty);
     let (content, composer, prefs_button, link_button, content_title, messages_box, messages_scroller) =
         build_content();
 
@@ -282,6 +286,7 @@ pub fn build(app: &adw::Application, cfg: &Config) -> WindowParts {
         sidebar_scroller,
         sidebar_empty,
         composer,
+        compose_btn,
         mode_line,
         command_bar,
         toast_overlay,
@@ -384,7 +389,7 @@ fn build_sidebar(
     list: &gtk::ListBox,
     search: &gtk::SearchEntry,
     empty_state: &gtk::Widget,
-) -> (gtk::Widget, gtk::ScrolledWindow) {
+) -> (gtk::Widget, gtk::ScrolledWindow, gtk::Button) {
     let title = adw::WindowTitle::new("Chats", "");
     let header = adw::HeaderBar::builder().title_widget(&title).build();
     header.add_css_class("flat");
@@ -420,7 +425,7 @@ fn build_sidebar(
     let toolbar = adw::ToolbarView::new();
     toolbar.add_top_bar(&header);
     toolbar.set_content(Some(&body));
-    (toolbar.upcast::<gtk::Widget>(), scroller)
+    (toolbar.upcast::<gtk::Widget>(), scroller, compose_btn)
 }
 
 /// Sidebar empty state shown when no chats exist yet. The "Link to

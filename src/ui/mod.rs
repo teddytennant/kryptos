@@ -13,6 +13,7 @@ mod commands;
 mod composer;
 mod dispatcher;
 mod input;
+mod new_chat;
 pub mod onboarding;
 pub mod settings;
 mod statusline;
@@ -58,10 +59,10 @@ pub fn run() -> glib::ExitCode {
 /// thread. The hub + cache are `Arc`-wrapped so the worker can clone
 /// handles freely; the runtime stays parked behind `Arc<Runtime>` so
 /// we can `runtime.spawn(...)` from anywhere.
-struct AsyncCtx {
-    runtime: Arc<tokio::runtime::Runtime>,
-    hub: Arc<MessengerHub>,
-    cache: Arc<Cache>,
+pub(super) struct AsyncCtx {
+    pub(super) runtime: Arc<tokio::runtime::Runtime>,
+    pub(super) hub: Arc<MessengerHub>,
+    pub(super) cache: Arc<Cache>,
 }
 
 impl AsyncCtx {
@@ -267,6 +268,13 @@ fn activate(app: &adw::Application) {
             active_chat.clone(),
             self_accounts.clone(),
         );
+        wire_new_chat_button(ctx.clone(), &parts);
+    } else {
+        // No backends — disable the + button so it doesn't dead-end.
+        parts.compose_btn.set_sensitive(false);
+        parts
+            .compose_btn
+            .set_tooltip_text(Some("Connect a backend first (Backends panel)"));
     }
 
     wire_composer_send(
@@ -515,6 +523,61 @@ async fn persist_event(cache: &Cache, ev: &MEvent) -> Result<()> {
         }
     }
     Ok(())
+}
+
+/// Wire the `+` button in the sidebar header to open the new-chat
+/// dialog and select the newly created row once it lands in the
+/// sidebar.
+fn wire_new_chat_button(ctx: Arc<AsyncCtx>, parts: &WindowParts) {
+    let win = parts.window.clone();
+    let toast = parts.toast_overlay.clone();
+    let sidebar_list = parts.sidebar_list.clone();
+    let sidebar_index = parts.sidebar_index.clone();
+    let sidebar_scroller = parts.sidebar_scroller.clone();
+    let sidebar_empty = parts.sidebar_empty.clone();
+    parts.compose_btn.connect_clicked(move |_| {
+        let ctx_for_dlg = ctx.clone();
+        let toast_for_dlg = toast.clone();
+        let lite = WindowPartsLite {
+            sidebar_list: sidebar_list.clone(),
+            sidebar_scroller: sidebar_scroller.clone(),
+            sidebar_empty: sidebar_empty.clone(),
+            sidebar_index: sidebar_index.clone(),
+        };
+        let sidebar_list_for_select = sidebar_list.clone();
+        let sidebar_index_for_select = sidebar_index.clone();
+        new_chat::present_new_chat(&win, ctx_for_dlg.clone(), toast_for_dlg, move |chat_id| {
+            // Re-prime from cache so the new row picks up the same
+            // sort + preview path everything else uses.
+            let pairs = match ctx_for_dlg
+                .runtime
+                .block_on(ctx_for_dlg.cache.list_active_conversations())
+            {
+                Ok(p) => p,
+                Err(e) => {
+                    warn!(error = %e, "post-new-chat refresh failed");
+                    return;
+                }
+            };
+            let summaries: Vec<ConversationSummary> = pairs
+                .iter()
+                .map(|(c, preview)| {
+                    let mut s = conv_row_to_summary(c);
+                    s.preview = preview.clone();
+                    s
+                })
+                .collect();
+            lite.set_conversations(&summaries);
+            if let Some(row) = sidebar_index_for_select
+                .borrow()
+                .iter()
+                .find(|(cid, _)| cid == &chat_id)
+                .map(|(_, r)| r.clone())
+            {
+                sidebar_list_for_select.select_row(Some(&row));
+            }
+        });
+    });
 }
 
 /// Wire row-clicks: when a sidebar row is selected, show the messages
@@ -822,6 +885,28 @@ struct WindowPartsLite {
 }
 
 impl WindowPartsLite {
+    fn set_conversations(&self, convs: &[ConversationSummary]) {
+        while let Some(row) = self.sidebar_list.row_at_index(0) {
+            self.sidebar_list.remove(&row);
+        }
+        self.sidebar_index.borrow_mut().clear();
+        for c in convs {
+            let ts_label = c
+                .last_message_ts
+                .map(window::format_clock_label)
+                .unwrap_or_default();
+            let preview = c.preview.as_deref().unwrap_or("");
+            let row = window::chat_row(c.label(), preview, &ts_label);
+            self.sidebar_list.append(&row);
+            self.sidebar_index
+                .borrow_mut()
+                .push((c.id.clone(), row.clone()));
+        }
+        let has_rows = self.sidebar_list.row_at_index(0).is_some();
+        self.sidebar_scroller.set_visible(has_rows);
+        self.sidebar_empty.set_visible(!has_rows);
+    }
+
     fn upsert_conversation(&self, summary: &ConversationSummary) {
         let existing = {
             let idx = self.sidebar_index.borrow();
