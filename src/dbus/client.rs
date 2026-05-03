@@ -156,6 +156,25 @@ impl SignalClient {
             }
         }
     }
+
+    /// Numbers in this account's contact directory (E.164). Empty list
+    /// is fine — fresh links haven't synced contacts yet.
+    pub async fn list_numbers(&self, account: &str) -> Result<Vec<String>> {
+        let proxy = self.account(account).await?;
+        Ok(proxy.list_numbers().await?)
+    }
+
+    /// Groups this account is a member of. Returns `(group_id, name)`;
+    /// the name may be empty for groups that the user never titled.
+    pub async fn list_groups(&self, account: &str) -> Result<Vec<(Vec<u8>, String)>> {
+        let proxy = self.account(account).await?;
+        Ok(proxy
+            .list_groups()
+            .await?
+            .into_iter()
+            .map(|(_path, id, name)| (id, name))
+            .collect())
+    }
 }
 
 /// signal-cli encodes E.164 numbers in the object path by stripping

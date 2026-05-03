@@ -196,32 +196,50 @@ impl MessengerBackend for SignalBackend {
     }
 
     async fn list_conversations(&self) -> Result<Vec<ConversationSummary>> {
-        // signal-cli's listAccounts returns *every* configured account on
-        // this host, not the active account's contacts. Until we add a
-        // dedicated proxy for contacts/groups, surface peer accounts as
-        // the conversation list. This is enough to wire UI plumbing.
-        let accounts = self.client.list_accounts().await?;
-        let mut out = Vec::with_capacity(accounts.len());
-        for a in accounts.into_iter().filter(|a| a != &self.account) {
-            // Resolve a friendly name for the peer (signal-cli
-            // getContactName, with cache as the secondary lookup).
-            // None at the end of this just means "show the E.164
-            // fallback in the UI".
+        // Real conversation list: signal-cli's per-account `listNumbers`
+        // (1:1 contacts) + `listGroups` (group threads). Self number is
+        // filtered out — chatting with yourself is the dedicated
+        // "Note to Self" feature, not a regular row.
+        let numbers = self.client.list_numbers(&self.account).await.unwrap_or_else(|e| {
+            warn!(error = %e, account = %self.account, "listNumbers failed; sidebar will skip 1:1 contacts");
+            Vec::new()
+        });
+        let groups = self.client.list_groups(&self.account).await.unwrap_or_else(|e| {
+            warn!(error = %e, account = %self.account, "listGroups failed; sidebar will skip groups");
+            Vec::new()
+        });
+
+        let mut out = Vec::with_capacity(numbers.len() + groups.len());
+
+        for n in numbers.into_iter().filter(|n| n != &self.account) {
             let display_name = resolve_signal_display_name(
                 &self.client,
                 self.cache.as_deref(),
                 &self.account,
-                &a,
+                &n,
             )
             .await;
             out.push(ConversationSummary {
-                id: ChatId::new(Backend::Signal, a.clone()),
-                title: a,
+                id: ChatId::new(Backend::Signal, n.clone()),
+                title: n,
                 display_name,
                 last_message_ts: None,
                 unread: 0,
             });
         }
+
+        for (gid, name) in groups {
+            let native = hex_encode(&gid);
+            let display_name = if name.is_empty() { None } else { Some(name) };
+            out.push(ConversationSummary {
+                id: ChatId::new(Backend::Signal, native.clone()),
+                title: native,
+                display_name,
+                last_message_ts: None,
+                unread: 0,
+            });
+        }
+
         Ok(out)
     }
 

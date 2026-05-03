@@ -79,6 +79,18 @@ pub trait Signal {
     #[zbus(name = "getContactName")]
     fn get_contact_name(&self, number: &str) -> zbus::Result<String>;
 
+    /// All E.164 numbers known to this account's contact store. Used
+    /// to seed the sidebar; an empty contact list is normal on a
+    /// freshly linked install until the phone syncs contacts over.
+    #[zbus(name = "listNumbers")]
+    fn list_numbers(&self) -> zbus::Result<Vec<String>>;
+
+    /// All groups this account is a member of. The tuple is
+    /// `(object_path, group_id_bytes, name)`; name may be empty for
+    /// unnamed groups.
+    #[zbus(name = "listGroups")]
+    fn list_groups(&self) -> zbus::Result<Vec<(OwnedObjectPath, Vec<u8>, String)>>;
+
     /// Emitted on incoming 1:1 messages.
     #[zbus(signal, name = "MessageReceived")]
     fn message_received(
