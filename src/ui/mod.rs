@@ -91,7 +91,9 @@ impl AsyncCtx {
 
         let mut hub = MessengerHub::new();
         if cfg.backends.signal.enabled {
-            match runtime.block_on(build_signal_backend(&cfg.backends.signal.account)) {
+            match runtime
+                .block_on(build_signal_backend(&cfg.backends.signal.account, cache.clone()))
+            {
                 Ok(Some(backend)) => hub.add(backend),
                 Ok(None) => debug!("no Signal account configured; backend not added"),
                 Err(e) => warn!(error = %e, "signal backend init failed"),
@@ -103,7 +105,7 @@ impl AsyncCtx {
         // is_authorized()). Otherwise log a hint pointing them at
         // `:telegram-login` so they're not stuck guessing.
         if cfg.backends.telegram.enabled {
-            match runtime.block_on(build_telegram_backend(&cfg.backends.telegram)) {
+            match runtime.block_on(build_telegram_backend(&cfg.backends.telegram, cache.clone())) {
                 Ok(Some(backend)) => hub.add(backend),
                 Ok(None) => info!(
                     "telegram backend enabled but not authorized; run :telegram-login"
@@ -127,6 +129,7 @@ async fn open_cache() -> Result<Cache> {
 
 async fn build_telegram_backend(
     cfg: &crate::config::schema::TelegramBackendConfig,
+    cache: Arc<Cache>,
 ) -> Result<Option<Arc<TelegramBackend>>> {
     if cfg.api_id == 0 || cfg.api_hash.is_empty() {
         return Ok(None);
@@ -137,10 +140,13 @@ async fn build_telegram_backend(
         debug!("telegram session present but not authorized");
         return Ok(None);
     }
-    Ok(Some(Arc::new(backend)))
+    Ok(Some(Arc::new(backend.with_cache(cache))))
 }
 
-async fn build_signal_backend(configured_account: &str) -> Result<Option<Arc<SignalBackend>>> {
+async fn build_signal_backend(
+    configured_account: &str,
+    cache: Arc<Cache>,
+) -> Result<Option<Arc<SignalBackend>>> {
     let client = match SignalClient::connect().await {
         Ok(c) => c,
         Err(e) => {
@@ -161,7 +167,9 @@ async fn build_signal_backend(configured_account: &str) -> Result<Option<Arc<Sig
         }
     };
     let client = Arc::new(client);
-    Ok(Some(Arc::new(SignalBackend::new(client, account))))
+    Ok(Some(Arc::new(
+        SignalBackend::new(client, account).with_cache(cache),
+    )))
 }
 
 fn activate(app: &adw::Application) {
@@ -316,10 +324,17 @@ fn spawn_remote_refresh(ctx: Arc<AsyncCtx>, parts: &WindowParts) {
         let convs = hub.list_all_conversations().await;
         // Write through to the cache so a future cold start has them.
         for c in &convs {
+            // Prefer the resolved display name in `name` so cold-start
+            // restoration shows the friendly label even before the
+            // remote refresh completes.
+            let cached_name = c
+                .display_name
+                .clone()
+                .unwrap_or_else(|| c.title.clone());
             let _ = cache
                 .upsert_conversation(&Conversation {
                     id: c.id.to_wire(),
-                    name: Some(c.title.clone()),
+                    name: Some(cached_name),
                     group_id: None,
                     last_message_ts: c.last_message_ts,
                     unread_count: c.unread as i32,
@@ -327,6 +342,15 @@ fn spawn_remote_refresh(ctx: Arc<AsyncCtx>, parts: &WindowParts) {
                     muted_until: None,
                 })
                 .await;
+            // Persist into the per-backend contacts directory too so
+            // signal-cli's `getContactName` results survive across
+            // restarts and the Telegram dialog list seeds the lazy
+            // event-side enrichment.
+            if let Some(name) = c.display_name.as_deref() {
+                let _ = cache
+                    .upsert_messenger_contact(c.id.backend.as_tag(), &c.id.native, name)
+                    .await;
+            }
         }
         let _ = tx.send(convs);
     });
@@ -396,9 +420,14 @@ fn spawn_event_subscription(
         loop {
             match events_rx.try_recv() {
                 Ok(MEvent::MessageReceived(msg)) => {
+                    // Carry through any sender display name the
+                    // backend resolved so the sidebar / header stop
+                    // showing the raw E.164 / numeric id once we've
+                    // seen the peer once.
                     let summary = ConversationSummary {
                         id: msg.id.clone(),
                         title: msg.id.native.clone(),
+                        display_name: msg.sender_display.clone(),
                         last_message_ts: Some(msg.ts_ms),
                         unread: 0,
                     };
@@ -443,10 +472,17 @@ fn spawn_event_subscription(
 async fn persist_event(cache: &Cache, ev: &MEvent) -> Result<()> {
     match ev {
         MEvent::MessageReceived(msg) => {
+            // Promote whatever display name the backend resolved into
+            // the conversation row so cold-start sees the friendly
+            // label. Falls back to the native id when none.
+            let conv_name = msg
+                .sender_display
+                .clone()
+                .unwrap_or_else(|| msg.id.native.clone());
             cache
                 .upsert_conversation(&Conversation {
                     id: msg.id.to_wire(),
-                    name: Some(msg.id.native.clone()),
+                    name: Some(conv_name),
                     group_id: None,
                     last_message_ts: Some(msg.ts_ms),
                     unread_count: 0,
@@ -454,6 +490,19 @@ async fn persist_event(cache: &Cache, ev: &MEvent) -> Result<()> {
                     muted_until: None,
                 })
                 .await?;
+            // Tuck the resolved name into the messenger_contacts
+            // table for future Signal events that arrive without a
+            // sourceName (lazy enrichment in the broadcast forwarder
+            // reads it back).
+            if let Some(name) = msg.sender_display.as_deref() {
+                let _ = cache
+                    .upsert_messenger_contact(
+                        msg.id.backend.as_tag(),
+                        &msg.sender,
+                        name,
+                    )
+                    .await;
+            }
             cache
                 .insert_message(&Message {
                     id: 0,
@@ -503,7 +552,19 @@ fn wire_sidebar_selection(
             None => return,
         };
         *active_chat.borrow_mut() = Some(id.clone());
-        content_title.set_title(&id.native);
+        // Prefer the resolved contact / chat name when the cache has
+        // one. Cheap synchronous block_on against SQLite — matches
+        // how `prime_sidebar_from_cache` already runs.
+        let title = ctx
+            .runtime
+            .block_on(
+                ctx.cache
+                    .get_messenger_contact_name(id.backend.as_tag(), &id.native),
+            )
+            .ok()
+            .flatten()
+            .unwrap_or_else(|| id.native.clone());
+        content_title.set_title(&title);
 
         let own_id = self_accounts.borrow().get(&id.backend).cloned();
 
@@ -626,6 +687,9 @@ fn wire_composer_send(
             id: id.clone(),
             ts_ms: now,
             sender: optimistic_sender.clone(),
+            // Outgoing messages render as "You" in the UI so we
+            // don't need a resolved display name here.
+            sender_display: None,
             body: Some(text.clone()),
             attachments: Vec::new(),
             backend_extras: match id.backend {
@@ -710,7 +774,7 @@ impl WindowPartsLite {
                 .last_message_ts
                 .map(window::format_clock_label)
                 .unwrap_or_default();
-            let row = window::chat_row(&c.title, "", &ts_label);
+            let row = window::chat_row(c.label(), "", &ts_label);
             self.sidebar_list.append(&row);
             self.sidebar_index
                 .borrow_mut()
@@ -741,7 +805,7 @@ impl WindowPartsLite {
             .last_message_ts
             .map(window::format_clock_label)
             .unwrap_or_default();
-        let row = window::chat_row(&summary.title, "", &ts_label);
+        let row = window::chat_row(summary.label(), "", &ts_label);
         self.sidebar_list.prepend(&row);
         self.sidebar_index
             .borrow_mut()
@@ -826,9 +890,21 @@ fn conv_row_to_summary(c: &Conversation) -> ConversationSummary {
         backend: crate::messenger::Backend::Signal,
         native: c.id.clone(),
     });
+    // The cached `name` column doubles as a "human label or
+    // backend-native id" — when it differs from the native id we
+    // treat it as a resolved display name. (Pre-contact-name code
+    // wrote the native id verbatim into `name`, so this heuristic
+    // promotes new entries while leaving legacy rows visible.)
+    let title_or_native = c.name.clone().unwrap_or_else(|| id.native.clone());
+    let display_name = if title_or_native != id.native {
+        Some(title_or_native.clone())
+    } else {
+        None
+    };
     ConversationSummary {
         id,
-        title: c.name.clone().unwrap_or_else(|| c.id.clone()),
+        title: title_or_native,
+        display_name,
         last_message_ts: c.last_message_ts,
         unread: c.unread_count.max(0) as u32,
     }

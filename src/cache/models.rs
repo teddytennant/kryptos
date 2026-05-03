@@ -35,6 +35,18 @@ pub struct Contact {
     pub blocked: bool,
 }
 
+/// Per-backend contact / peer entry. Looked up by `(backend,
+/// native_id)`; populated by each backend's `list_conversations` (and
+/// lazily on incoming events) so the UI can show a real display name
+/// instead of a raw E.164 / numeric id.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MessengerContact {
+    pub backend: String,
+    pub native_id: String,
+    pub display_name: String,
+    pub updated_at: i64,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Attachment {
     pub id: i64,

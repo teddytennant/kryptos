@@ -128,9 +128,24 @@ pub struct NormalizedMessage {
     pub id: ChatId,
     pub ts_ms: i64,
     pub sender: String,
+    /// Friendly sender label when the backend resolved one (Telegram
+    /// `first_name [last_name]`, signal-cli envelope `sourceName` /
+    /// cached contact). Falls back to `sender` for the UI when
+    /// `None`.
+    pub sender_display: Option<String>,
     pub body: Option<String>,
     pub attachments: Vec<NormalizedAttachment>,
     pub backend_extras: BackendExtras,
+}
+
+impl NormalizedMessage {
+    /// Best-effort display name for the message author. Returns the
+    /// resolved label when present, otherwise the raw `sender`.
+    pub fn sender_label(&self) -> &str {
+        self.sender_display
+            .as_deref()
+            .unwrap_or(self.sender.as_str())
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -150,9 +165,27 @@ pub enum Event {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ConversationSummary {
     pub id: ChatId,
+    /// Raw fallback title (the backend's native id, used when nothing
+    /// better is available). Kept around so the UI can still render
+    /// something for an unknown peer.
     pub title: String,
+    /// Friendly name resolved from the backend's contact / chat
+    /// metadata (Telegram `first_name [last_name]` for users, group
+    /// title for chats; signal-cli `getContactName` for E.164 peers).
+    /// `None` means "we couldn't resolve a name; fall back to `title`".
+    pub display_name: Option<String>,
     pub last_message_ts: Option<i64>,
     pub unread: u32,
+}
+
+impl ConversationSummary {
+    /// Best-effort label for the chat list. Prefers the resolved
+    /// display name, falls back to the raw `title`.
+    pub fn label(&self) -> &str {
+        self.display_name
+            .as_deref()
+            .unwrap_or(self.title.as_str())
+    }
 }
 
 /// Common surface every messenger backend exposes to the rest of the app.
@@ -237,5 +270,56 @@ mod tests {
         assert_eq!(ChatId::from_wire("signal"), None, "no colon");
         assert_eq!(ChatId::from_wire("signal:"), None, "empty native");
         assert_eq!(ChatId::from_wire("imessage:foo"), None, "unknown tag");
+    }
+
+    #[test]
+    fn conversation_summary_label_prefers_display_name() {
+        let with_name = ConversationSummary {
+            id: ChatId::new(Backend::Signal, "+14155552671"),
+            title: "+14155552671".into(),
+            display_name: Some("Alice Smith".into()),
+            last_message_ts: None,
+            unread: 0,
+        };
+        assert_eq!(with_name.label(), "Alice Smith");
+
+        let without_name = ConversationSummary {
+            id: ChatId::new(Backend::Telegram, "12345"),
+            title: "12345".into(),
+            display_name: None,
+            last_message_ts: None,
+            unread: 0,
+        };
+        assert_eq!(
+            without_name.label(),
+            "12345",
+            "fallback to title when display_name is None"
+        );
+    }
+
+    #[test]
+    fn normalized_message_sender_label_falls_back_to_sender() {
+        let resolved = NormalizedMessage {
+            id: ChatId::new(Backend::Telegram, "9"),
+            ts_ms: 1,
+            sender: "9".into(),
+            sender_display: Some("Carol Danvers".into()),
+            body: Some("hi".into()),
+            attachments: Vec::new(),
+            backend_extras: BackendExtras::Telegram {
+                reply_to_msg_id: None,
+            },
+        };
+        assert_eq!(resolved.sender_label(), "Carol Danvers");
+
+        let unresolved = NormalizedMessage {
+            sender_display: None,
+            ..resolved
+        };
+        assert_eq!(
+            unresolved.sender_label(),
+            "9",
+            "fall back to raw sender when None"
+        );
     }
 }

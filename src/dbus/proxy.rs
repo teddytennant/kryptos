@@ -72,6 +72,13 @@ pub trait Signal {
     #[zbus(name = "sendReadReceipt")]
     fn send_read_receipt(&self, recipient: &str, message_ids: &[i64]) -> zbus::Result<()>;
 
+    /// Resolve a recipient (E.164 or UUID) to the locally-stored
+    /// contact / profile name. signal-cli returns "" when the contact
+    /// is unknown; the high-level wrapper in `client.rs` maps that to
+    /// `None` so callers don't have to special-case empty strings.
+    #[zbus(name = "getContactName")]
+    fn get_contact_name(&self, number: &str) -> zbus::Result<String>;
+
     /// Emitted on incoming 1:1 messages.
     #[zbus(signal, name = "MessageReceived")]
     fn message_received(

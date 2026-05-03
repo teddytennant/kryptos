@@ -144,6 +144,7 @@ mod tests {
             Ok(vec![ConversationSummary {
                 id: ChatId::new(self.kind, "mock"),
                 title: format!("{} mock", self.kind),
+                display_name: None,
                 last_message_ts: None,
                 unread: 0,
             }])
@@ -206,6 +207,7 @@ mod tests {
             id: ChatId::new(backend, native),
             ts_ms: 1,
             sender: "tester".into(),
+            sender_display: None,
             body: Some(body.into()),
             attachments: Vec::new(),
             backend_extras: extras,
