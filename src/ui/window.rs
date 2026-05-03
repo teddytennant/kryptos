@@ -21,6 +21,7 @@ use std::hash::{Hash, Hasher};
 use std::rc::Rc;
 
 use adw::prelude::*;
+use gtk::glib;
 
 use crate::config::Config;
 use crate::messenger::{ChatId, ConversationSummary, NormalizedMessage};
@@ -46,6 +47,11 @@ pub struct WindowParts {
     /// Box that holds rendered message rows; rebuilt on chat switch and
     /// appended-to when a new event lands.
     pub messages_box: gtk::Box,
+    /// ScrolledWindow that wraps `messages_box`. Exposed so the
+    /// dispatcher can read the vadjustment for "near-bottom" checks
+    /// before appending a new message and snap to the latest message
+    /// when the user is already pinned to the foot of the chat.
+    pub messages_scroller: gtk::ScrolledWindow,
     /// Sidebar rows in the same order as the conversation list, paired
     /// with their `ChatId`s. The dispatcher reads this when the user
     /// clicks (or `j`/`k`s) to a row to find the active chat id.
@@ -136,7 +142,46 @@ impl WindowParts {
             })
             .collect();
         populate_messages(&self.messages_box, &rows, now);
+        // Fresh chat open: pin to the latest message unconditionally.
+        scroll_to_bottom_idle(&self.messages_scroller);
     }
+}
+
+/// Distance, in pixels, from the bottom edge that still counts as
+/// "near the bottom" for autoscroll purposes. Picked at 16px so a user
+/// who is actively reading near the foot of the chat — but hasn't quite
+/// scrolled to the absolute bottom — still gets snapped down. Anything
+/// higher feels like the view is "stealing" their scroll position.
+const NEAR_BOTTOM_PX: f64 = 16.0;
+
+/// True when the scroller's vadjustment is within [`NEAR_BOTTOM_PX`] of
+/// the bottom (or the content fits without scrolling). Read this *before*
+/// appending a new row — once the row is in the tree the upper bound has
+/// already grown and you'd nearly always look "not near bottom" if a
+/// long row just landed.
+pub(super) fn is_near_bottom(scroller: &gtk::ScrolledWindow) -> bool {
+    let adj = scroller.vadjustment();
+    let upper = adj.upper();
+    let page = adj.page_size();
+    let value = adj.value();
+    // Content fits without scrolling: there's nowhere else to be.
+    if upper <= page {
+        return true;
+    }
+    (upper - (value + page)) <= NEAR_BOTTOM_PX
+}
+
+/// Schedule a scroll-to-bottom on the next idle tick. We defer because
+/// `gtk::Box::append` only updates layout asynchronously — reading the
+/// vadjustment immediately would still see the pre-append upper bound,
+/// so the scroll would land short of the new last row.
+pub(super) fn scroll_to_bottom_idle(scroller: &gtk::ScrolledWindow) {
+    let scroller = scroller.clone();
+    glib::idle_add_local_once(move || {
+        let adj = scroller.vadjustment();
+        let target = (adj.upper() - adj.page_size()).max(adj.lower());
+        adj.set_value(target);
+    });
 }
 
 pub fn build(app: &adw::Application, cfg: &Config) -> WindowParts {
@@ -151,7 +196,7 @@ pub fn build(app: &adw::Application, cfg: &Config) -> WindowParts {
     let sidebar_search = build_sidebar_search();
     let sidebar_empty = build_sidebar_empty_state();
     let (sidebar, sidebar_scroller) = build_sidebar(&sidebar_list, &sidebar_search, &sidebar_empty);
-    let (content, composer, prefs_button, link_button, content_title, messages_box) =
+    let (content, composer, prefs_button, link_button, content_title, messages_box, messages_scroller) =
         build_content();
 
     let split = adw::OverlaySplitView::builder()
@@ -211,6 +256,7 @@ pub fn build(app: &adw::Application, cfg: &Config) -> WindowParts {
         toast_overlay,
         content_title,
         messages_box,
+        messages_scroller,
         sidebar_index,
     }
 }
@@ -387,6 +433,7 @@ fn build_content() -> (
     gtk::Button,
     adw::WindowTitle,
     gtk::Box,
+    gtk::ScrolledWindow,
 ) {
     let content_title = adw::WindowTitle::new("Kryptos", "");
     let header = adw::HeaderBar::builder()
@@ -454,6 +501,7 @@ fn build_content() -> (
         link_button,
         content_title,
         messages_box,
+        messages_scroll,
     )
 }
 
