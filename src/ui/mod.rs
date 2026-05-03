@@ -30,7 +30,7 @@ use tracing::{debug, error, info, warn};
 
 use crate::cache::models::{Conversation, Message};
 use crate::cache::Cache;
-use crate::config::{loader, Config};
+use crate::config::{loader, Config, ConfigWatcher};
 use crate::core::Result;
 use crate::dbus::SignalClient;
 use crate::messenger::{
@@ -212,6 +212,14 @@ fn activate(app: &adw::Application) {
     };
     let engine = Rc::new(RefCell::new(engine));
     let dispatcher = Dispatcher::new(&parts, theme.clone(), config_path.clone());
+
+    // Live-reload: watch `config.toml` for saves and reapply theme in
+    // place when the user edits `[general] theme = "..."`. The watcher's
+    // worker thread broadcasts new `Config` snapshots through a
+    // `tokio::sync::watch` channel; we poll it on the GTK main loop so
+    // mutations to `theme` (a non-`Send` `Rc<RefCell<_>>`) stay on the
+    // GTK thread.
+    spawn_config_watcher(config_path.clone(), theme.clone());
 
     let async_ctx = AsyncCtx::try_build(&cfg);
 
@@ -684,6 +692,54 @@ fn wire_composer_send(
                 }
             });
         }
+    });
+}
+
+/// Spawn a `ConfigWatcher` for `config_path` and poll it from the GTK
+/// main loop. When a fresh snapshot arrives whose `theme` differs from
+/// the manager's currently-applied theme, reapply in place — same
+/// `CssProvider`, no display re-registration.
+///
+/// The watcher (which owns a notify thread + worker thread) is moved
+/// into the timeout closure so its lifetime matches the application.
+/// Errors creating the watcher are logged and degrade gracefully: the
+/// app keeps running, just without live reload.
+fn spawn_config_watcher(config_path: std::path::PathBuf, theme: Rc<RefCell<ThemeManager>>) {
+    let watcher = match ConfigWatcher::new(config_path) {
+        Ok(w) => w,
+        Err(e) => {
+            warn!(error = %e, "config watcher disabled; live-reload off");
+            return;
+        }
+    };
+
+    // `tokio::sync::watch::Receiver` is poll-friendly without a tokio
+    // runtime: `has_changed()` and `borrow_and_update()` are sync. We
+    // poll every 200ms which is well under save-to-visible perceptual
+    // latency (the worker itself debounces ~150ms inside notify).
+    let mut rx = watcher.rx.clone();
+    // Move the watcher into the closure so its notify + worker threads
+    // outlive `activate()`. Underscore-prefixed because we never read
+    // it — but it must stay owned; dropping it would tear down the
+    // background machinery.
+    let _watcher_keepalive = watcher;
+
+    glib::source::timeout_add_local(Duration::from_millis(200), move || {
+        if !rx.has_changed().unwrap_or(false) {
+            return glib::ControlFlow::Continue;
+        }
+        let new_cfg = rx.borrow_and_update().clone();
+        let mut tm = theme.borrow_mut();
+        let current = tm.current().unwrap_or("");
+        if !new_cfg.general.theme.eq_ignore_ascii_case(current) {
+            match tm.apply(&new_cfg.general.theme) {
+                Ok(()) => info!(theme = %new_cfg.general.theme, "theme hot-reloaded"),
+                Err(e) => warn!(error = %e, "live theme reload failed"),
+            }
+        }
+        // Anchor the watcher's lifetime to this closure.
+        let _ = &_watcher_keepalive;
+        glib::ControlFlow::Continue
     });
 }
 
