@@ -4,6 +4,9 @@ A vim-first Signal desktop client for Linux. Native GTK4 + libadwaita.
 No Electron, no webview. Built for NixOS + Hyprland; works anywhere
 GTK4 runs.
 
+> ⚠️ **WIP — nothing here is guaranteed to work.** Early-stage, in-progress
+> project shared in the open. Expect breakage; APIs and layout may change.
+>
 > **Status:** phase 0 — foundation. Window opens, modules compile.
 > Signal-cli wiring, vim modal engine, and message view come next.
 
